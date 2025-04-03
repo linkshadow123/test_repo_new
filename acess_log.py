@@ -47,7 +47,7 @@ def write_json(path, data):
         with open(path, "w") as json_file:
             json.dump(data, json_file)
 
-# def get_github_organization_repositories(headers, username):
+def get_github_organization_repositories(headers, username):
 #     if headers and username:
 #         url_org = f'https://api.github.com/users/{username}/repos'
 #         response = requests.get(url_org, headers=headers)
