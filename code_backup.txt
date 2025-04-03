@@ -1,0 +1,4510 @@
+import os
+import json
+import sys
+import time
+import dateutil
+import requests
+from datetime import datetime, timedelta
+import traceback
+import requests
+import requests
+
+import sqlite3
+import mysql.connector
+import pymssql
+import psycopg2
+import cx_Oracle
+import pymongo
+from pymongo import MongoClient
+import random
+
+# import cx_Oracle
+
+import oracledb
+
+#put this in bashrc or rc.local file
+
+# export ORACLE_HOME=/opt/oracle/instantclient_23_5
+
+# export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ORACLE_HOME
+import requests
+
+# import pandas as pd
+# import paramiko
+# import pymssql
+
+
+# to import fucntions from /opt/linkprocess
+# sys.path.append('/opt/linkprocess/')
+# from module.lib.services import Services as LSServices
+dirname, filename = os.path.split(os.path.abspath(__file__))
+sys.path.append(dirname)
+
+plugin_folder_name =  "dbmanager_1716287369_general"
+plugin_name = 'dbmanager_1716287369'
+from plugin import Plugin
+
+commonFunction_obj = Plugin(plugin_folder_name)
+#importing functions from /opt/linkshadow/dashboard/leo/
+sys.path.append('/opt/linkshadow/dashboard/leo/')
+# import ls_common
+#setting directory path and file name 
+
+# redisclient object creation
+# redisClient = LSServices.get_redis_client()
+# all logs for rule builder/ usecase builder will be sent to this redis queue 
+rule_builder_queue_name = 'integrates*'
+
+#setting verify ssl from Linkshadow general settings
+# verifySsl = True
+# if redisClient.hget('settingsGeneral','verifySslCertificate') == '0':
+#     verifySsl = False
+
+# turn on/off print flag
+PRINT_FLAG=1
+
+def read_file(path):
+    file = open(path, "r")
+    data = file.read()
+    file.close()
+    return data
+
+def read_json(path):
+    data = {}
+    if os.path.isfile(path):
+        with open(path) as f:
+            data = json.load(f)
+    return data
+
+def get_settings_data():
+    settings_file = str(dirname + '/settings.json')
+    settings_data = read_json(settings_file)
+    return settings_data
+
+def get_config_data():
+    settings_file = str(dirname + '/config.json')
+    settings_data = read_json(settings_file)
+    return settings_data
+
+def get_stats_data():
+    settings_file = str(dirname + '/stats.json')
+    settings_data = read_json(settings_file)
+    return settings_data
+
+def write_file(path, data):
+    file = open(path, "w+")
+    file.write(data)
+    file.close()
+
+def write_json(path, data):
+    if os.path.isfile(path):
+        with open(path, 'w') as json_file:
+            json.dump(data, json_file)
+
+def write_statistics(log_type_, last_runtime_):
+    configPath = str(dirname + '/stats.json')
+    config_data_ = read_json(configPath)
+    if 'statistics' not in config_data_:
+        config_data_['statistics'] = {}
+    config_data_['statistics'][log_type_] = last_runtime_
+    write_json(configPath, config_data_)
+
+
+#----------------------------#
+# Save settings function
+#----------------------------#
+def saveCustomSettings(data):
+    now = datetime.now().strftime('%s')
+    data['epoch'] = now
+    settings = get_settings_data()
+    
+    if data.get('uid'):
+        for r in range(len(settings)):
+            if 'uid' in settings[r] and settings[r]['uid'] == data.get('uid'):
+                if data.get('password') != settings[r]['password']:    
+                    password = data.get('password') 
+                    data['password'] = commonFunction_obj.encrypt_value(data.get("uid"), password)
+                else:
+                    data['password'] = settings[r]['password']
+                settings[r] = data
+    else:
+        data['uid'] = now
+    
+        data['password'] = commonFunction_obj.encrypt_value(data.get("uid"), data.get("password"))
+        if isinstance(settings, list):
+            settings.append(data)
+        else:
+            settings = [data]
+    try:
+        write_file(str(dirname + '/settings.json'),json.dumps(settings))
+    except Exception as e:
+        print('here completed the work')
+    
+    res = {'message': 'success', 'data':settings}
+    return res
+
+
+def deleteSettings(data):
+    filename = "/opt/linkshadow/dashboard/leo/plugins/installed/"+plugin_folder_name+"/keys.json"
+
+    settings  = get_settings_data()
+    del_index = None
+    for index, item in enumerate(settings):
+        if str(item.get('uid')) == str(data['uid']):
+            uid = str(item.get('uid'))
+            del_index = index
+            break
+
+    if del_index >= 0:
+        del settings[del_index]
+
+        with open(filename, 'r') as f:
+            my_list = json.load(f)
+            if str(uid) in my_list.keys():
+                del my_list[uid]               
+     
+        write_file(str(filename), json.dumps(my_list))       
+   
+        write_file(str(dirname + '/settings.json'), json.dumps(settings))
+        res = {
+            'message': 'success', 
+            'data':settings
+            }
+    else:
+        res = {
+            'message': 'error', 
+            'data':settings
+            }
+        print(res)
+    return res
+
+#use the following function to get useragent name
+def useragent():
+    return 'Linkshadow/Integrations'
+
+#use this function to get request data
+def get_request(url, params={}, headers={}):
+    response = requests.get(url, params=params, headers=headers, proxies=proxies, verify=verifySsl,timeout=300)
+    return response
+
+#use this function to post data
+def post_request(url, data={}, headers={}):
+    response = requests.post(url, data=data, headers=headers, proxies=proxies, verify=verifySsl,timeout=300)
+    return response
+
+
+# def connection_status(server_type, ip_addr, port, username, password):
+#     if server_type == "ftp":
+#         try:
+#             transport = paramiko.Transport((ip_addr, port))
+#             transport.connect(username=username, password=password)#paramiko.ssh_exception.AuthenticationException:
+#             sftp = paramiko.SFTPClient.from_transport(transport)
+#             sftp.close()
+#             transport.close()
+#             return (True, "Authentication Successful")
+#         except paramiko.ssh_exception.AuthenticationException as _:
+#             return (False, "Authentication Error, Invalid username or password")
+#         except paramiko.ssh_exception.SSHException as _:
+#             return (False, "Connection failed")
+#         except Exception as _:
+#             return (False, "Something went wrong, Please try again later")
+#     elif server_type == "smb":
+#         return (False, "Only SFTP supported")
+#     else:
+#         return (False, "Only SFTP supported")
+
+
+
+def mysql_index_based_access(connection, database, table_name):
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            index = 5
+            indexed = (f"SELECT * FROM {table_name} ORDER BY emp_no LIMIT {index+5}")
+            cursor.execute(indexed)
+            indexed_row = cursor.fetchone()
+            print("----------------")
+            print("Index Based row: ")
+            print("----------------")
+            if indexed_row:
+                print(indexed_row)
+            else:
+                print("No data found")
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Random Accessed One Database"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        return res
+
+
+def mysql_random_access_data(connection, database, table_name):
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            random = (f"SELECT * FROM {table_name} ORDER BY RAND() LIMIT 1")
+            cursor.execute(random)
+            random_row = cursor.fetchone()
+            print("------------")
+            print("Random row: ")
+            print("------------")
+            if random_row:
+                print(random_row)
+            else:
+                print("No data found")
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Random Accessed One Database"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        return res
+
+
+def mysql_bottom_10_datas(connection, database, table_name):
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            bottum_ten_datas = (f"SELECT * FROM {table_name} ORDER BY emp_no DESC LIMIT 10")
+            cursor.execute(bottum_ten_datas)
+            bottom = cursor.fetchall()
+            print("----------------------")
+            print("Buttom 10 datas")
+            print("----------------------")
+            for btum in bottom:
+                print(btum)
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected One Database"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        return res
+
+
+def mysql_top_10_datas(connection, database, table_name):
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            top_ten_datas = (f"SELECT * FROM {table_name} LIMIT 10")
+            cursor.execute(top_ten_datas)
+            datas = cursor.fetchall()
+            print("-------------")
+            print("Top 10 datas")
+            print("-------------")
+            for row in datas:
+                print(row)
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched Top 10 datas in One Table"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+    
+
+def mysql_display_all_datas(connection, database, table_name):
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            query = (f"select * from {table_name}")
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            print(rows)
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected all Datas"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_display_all_tables(connection, database): 
+
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            cursor.execute("SHOW TABLES")
+            tables = cursor.fetchall()
+
+            print("----------------------")
+            print(f"Tables in : {database} ")
+            print("----------------------")
+            for table in tables:
+                print("*", table[0])
+
+            table_name = "employees.titles"
+
+            # mysql_display_all_datas(connection, database, table_name)
+            mysql_top_10_datas(connection, database, table_name)
+            mysql_bottom_10_datas(connection, database, table_name)
+            mysql_random_access_data(connection, database, table_name)
+            mysql_index_based_access(connection, database, table_name)
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected One Database"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_fetch_one_database(connection):
+
+    if connection.is_connected():
+
+        try:
+
+            cursor = connection.cursor()
+
+            database_name = "employees"
+            print("----------------------")
+            print("Selected Database : ",database_name)
+            cursor.execute(f"USE {database_name}")
+            cursor.execute("SELECT DATABASE()")
+            current_db = cursor.fetchone()
+
+
+            mysql_display_all_tables(connection, database_name)
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected One Database"
+                }
+
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_fetch_all_databasaes(connection):
+
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SHOW DATABASES")
+            database = cursor.fetchall()
+
+            
+            for db in database:
+                print(f"* {db[0]}")
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched all Databases "
+                }
+                    
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_user_permission(connection):
+    print("#######################")
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            query = """
+            SELECT
+                user,
+                host,
+                db,
+                SELECT_priv,
+                INSERT_priv,
+                UPDATE_priv,
+                DELETE_priv,
+                CREATE_priv,
+                DROP_priv,
+                GRANT_priv,
+                REFERENCES_priv,
+                INDEX_priv,
+                ALTER_priv,
+                CREATE_tmp_table_priv,
+                LOCK_tables_priv,
+                CREATE_view_priv,
+                SHOW_view_priv,
+                CREATE_routine_priv,
+                ALTER_routine_priv,
+                EXECUTE_priv,
+                EVENT_priv,
+                TRIGGER_priv
+            FROM
+                mysql.db
+            ORDER BY
+                user, host, db;
+            """
+
+            cursor.execute(query)
+
+            permissions = cursor.fetchall()
+
+            for perm in permissions:
+                print(f"Database User: {perm[0]}, User Type: {perm[1]}, Login Name: {perm[2]}, Permission: {perm[3]}, State: {perm[4]}")
+                
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched all Databases "
+                    }
+                    
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_list_users(connection):
+
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+
+            query = """
+            SELECT
+                user
+            FROM
+                mysql.user
+            ORDER BY
+                user;
+            """
+
+            cursor.execute(query)
+
+            users = cursor.fetchall()
+
+            print("---------")
+            print("User List")
+            print("---------")
+
+            # Print the list of users
+            for user in users:
+                print("*",user[0])
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched all Databases "
+                    }
+                    
+        except Exception as e:
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Connection is not proper"
+
+        }
+        
+        return res
+
+
+def mysql_connection_close(connection):
+    print('##########################')
+    if connection.is_connected():
+        print('##########################')
+
+        cursor = connection.cursor()
+        cursor.close()
+        connection.close()
+        print("Database connection closed")
+    return True
+
+
+def mysql_connection(data = {}):
+    if data:
+        host = data['host']
+        port = data['port']
+        username = data['username']
+        password = data['password']
+        print("####################",host, port, username, password)
+        
+        #mysql connection 
+        try:
+            connection = mysql.connector.connect(
+                host = host,
+                username = username,
+                password = password,
+                port = port 
+            )
+            if connection.is_connected():
+
+                # fetch_database_table_and_fileds(connection)
+                mysql_list_users(connection)
+                mysql_user_permission(connection)
+                mysql_fetch_all_databasaes(connection)
+                mysql_fetch_one_database(connection)
+                mysql_connection_close(connection)
+                res = {
+                    "status" : "success",
+                    "message" : "Successfully Connected"
+                }
+
+                return res 
+                
+        except Exception as e:
+            print('except is working',traceback.format_exc())
+            res = {
+                "status" : "error",
+                "message" : str(e)
+            }
+        
+        
+    else:
+        res = {
+            "status" : "error",
+            "message" : "Data is not Found"
+
+        }
+        
+        return res
+
+
+def fetch_mssql_tables(connection):
+    try:
+
+        print("Connection object is None.")
+        cursor = connection.cursor()
+        cursor.execute(f"USE {connection}")
+
+        #fetch one database
+        cursor.execute("select DB_NAME()")
+        current_db = cursor.fetchone()
+        print(f"Current database : {current_db[0]}")
+
+    except Exception as e:
+        print(f"Error : {e}")
+
+
+def mssql_colum_discription(connection, table_name):
+    if connection and table_name:
+        try:
+            cursor = connection.cursor()
+
+            cursor.execute(f"SELECT TOP 1 * FROM {table_name}")
+
+            # Fetch one row 
+            cursor.fetchone()
+
+            # find the coulumn discription using description() in build function
+            column_names = [desc[0] for desc in cursor.description]
+            print('---------------------------')
+            print("Column names in the table:")
+            print('---------------------------')
+
+            for name in column_names:
+                print(name)
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+    else:
+        print("Database connection or Tablename is not found")
+        res = {
+            "status":"error",
+            "message":"Database Connetction or Table is not Found!"
+        }
+        return res
+
+
+def mssql_fetch_top_10_datas(connection, table_name):
+
+    if connection and table_name:
+
+        try:
+            cursor = connection.cursor()
+
+            # get the top 10 records
+            query_top = (f"SELECT TOP 10 * FROM {table_name}")
+            
+            cursor.execute(query_top)
+            top_10 = cursor.fetchall()
+            
+            print('-----------------')
+            print("Top 10 datas:")
+            print('-----------------')
+
+            for row in top_10:
+                print(row)
+            
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched and Display Top 10 data from table"
+                    }
+            return res 
+
+        except Exception as e:
+            print(e)
+
+    else:
+        print("Database Connection or Table is not found")
+        res = {
+            "status":"error",
+            "message":"Database Connection or Table is not Found!"
+        }
+        return res
+
+
+def mssql_fetch_bottom_10_datas(connection, table_name):
+    if connection and table_name:
+        try:
+            cursor = connection.cursor()
+
+            #Query to get the bottom 10 records
+            bottom = (f"SELECT * FROM {table_name} ORDER BY DepartmentID DESC OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY")
+
+            cursor.execute(bottom)
+            bottom_ten_records = cursor.fetchall()
+
+            print('----------------------')
+            print("Bottom 10 records:")
+            print('----------------------')
+
+            for record in bottom_ten_records:
+                    print(record)
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fecthed bottom 10 data from table"
+                    }
+            return res 
+
+        except Exception as e:
+            print(f"Error : {e}")
+    
+    else:
+        print("Database Connection and Table_name not found!")
+        res = {
+            "status":"error",
+            "message":"Database Connection or Table is not Found!"
+        }
+        return res
+
+
+def mssql_random_access(connection, table_name):
+
+    if connection and table_name:
+
+        try:
+            cursor = connection.cursor()
+
+            department_id = 10
+
+            query = (f"SELECT * FROM {table_name} WHERE DepartmentID = {department_id}")
+            cursor.execute(query)
+
+            records = cursor.fetchone()
+
+            print("--------------------")
+            print("Random Based row: ")
+            print("--------------------")
+
+            if records:
+                print(records)
+            else:
+                print("Data is not found!")
+
+        except Exception as e:
+            print(f"Error : {e}")
+    
+    else:
+        print("Database Connection and Table_name not found!")
+        res = {
+            "status":"error",
+            "message":"Database Connection or Table is not Found!"
+        }
+        return res    
+
+
+def mssql_select_one_table_name(connection, database):
+
+    if connection and database:
+
+        try:
+            cursor = connection.cursor()
+
+            table_name = "AdventureWorks2022.HumanResources.Department"
+
+            # Display all table details
+            query = (f"select * from {table_name}")
+
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            print(rows)
+
+            print(f"Data from table : {table_name}")
+            print("----------------------------------")
+            for table in rows:
+                print(table)
+
+            #colum disicription and top_10, bottom_10 data feching and display
+            mssql_colum_discription(connection, table_name)
+            mssql_fetch_top_10_datas(connection, table_name)
+            mssql_fetch_bottom_10_datas(connection, table_name)
+            mssql_random_access(connection, table_name)
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected table"
+                    }
+            return res 
+        
+        except Exception as e:
+            print(f"Error : {e}")
+        
+    else:
+        print("Database Connection or Table not found!")
+        res = {
+            "status":"error",
+            "message":"Database Connection or Table is not Found!"
+        }
+        return res
+
+
+def mssql_select_one_database(connection, database_name):
+
+    if connection and database_name:
+
+        try:
+
+            cursor = connection.cursor()
+
+            cursor.execute("select table_name from information_schema.tables ")            
+            tables = cursor.fetchall()
+
+            print("-------")
+            print("Tables")
+            print("-------")
+
+            data_ = []
+            list_files = {}
+            for data in tables:
+                print(data[0])                           
+                data_.append({'table_name': data[0] , 'database_name': database_name, 'database_path':'', 'source':'mssql'})              
+            list_files['db_list'] = data_
+            ddr_check_file(list_files)
+
+
+            # mssql_select_one_table_name(connection, database_name)
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Selected Databases"
+                    }
+            return res 
+        except Exception as e:
+            print(f"Error : {e}")
+
+    else:
+        print("Connection or Database is not found")
+        res = {
+            "status":"error",
+            "message":"Connection or Database is not Found"
+        }
+        return res
+
+
+def ddr_check_file(list_files: list) -> dict:
+    """
+    The API Call First End Point into DDR new Product
+    """
+    if list_files:
+        url = 'http://172.16.230.150:5050/rdd/backend/v1/check-databases'
+        try:
+            response = requests.post(url, json=list_files)
+            print('the response for ddr',response)
+            response_text = json.loads(response.text)
+            print(response_text)
+            if response.status_code == 200:
+                res = {
+                    "status": 1,
+                    "message": "Success",
+                    "files": response_text
+                }
+                return res
+            else:
+                res = {
+                    "status": 0,
+                    "message": "Error"
+                }
+                return res
+        except requests.exceptions.HTTPError as errh:
+            res = {
+                "status": 0,
+                "message": str(errh)
+            }
+            return res
+        except requests.exceptions.ReadTimeout as errrt:
+            res = {
+                "status": 0,
+                "message": str(errrt)
+            }
+            return res
+        except requests.exceptions.ConnectionError as conerr:
+            res = {
+                "status": 0,
+                "message": str(conerr)
+            }
+            return res
+        except requests.exceptions.RequestException as errex:
+            res = {
+                "status": 0,
+                "message": str(errex)
+            }
+            return res
+    else:
+        res = {
+            "status": 0,
+            "message": "Data is not Found"
+        }
+        return res
+    
+    
+def mssql_user_permission(connection, database, username):
+    if connection and database:
+        try:
+
+            cursor = connection.cursor()
+
+            cursor.execute(f"""
+                SELECT 
+                    dp.name AS DatabaseUserName,
+                    dp.type_desc AS UserType,
+                    sp.name AS LoginName,
+                    perm.permission_name AS PermissionName,
+                    perm.state_desc AS PermissionState
+                FROM 
+                    sys.database_principals dp
+                LEFT JOIN 
+                    sys.server_principals sp
+                ON 
+                    dp.sid = sp.sid
+                LEFT JOIN 
+                    sys.database_permissions perm
+                ON 
+                    dp.principal_id = perm.grantee_principal_id
+                WHERE 
+                    dp.name = '{username}'
+            """)
+
+            user_permissions = cursor.fetchall()
+            for permission in user_permissions:
+                print(f"Database User: {permission[0]}, User Type: {permission[1]}, Login Name: {permission[2]}, Permission: {permission[3]}, State: {permission[4]}")
+            
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched Users List"
+                    }
+            return res
+
+        except Exception as e:
+            print(f"Error : {e}")
+
+    else:
+        print("Connection or Database is not found!")
+        res = {
+            "status":"error",
+            "message":"Connection is not Found"
+        }
+        return res 
+
+
+def mssql_users_list(connection, database_name):
+
+    if connection and database_name:
+        try:
+
+            cursor = connection.cursor()
+
+            query = "SELECT name FROM sys.database_principals WHERE type = 'S' OR type = 'U';"
+            cursor.execute(query)
+
+            users = cursor.fetchall()
+            print("-------------------")
+            print("Users List in MSSQL")
+            print("-------------------")
+
+            for user in users:
+                print("*",user)
+            
+            
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched Users List"
+                    }
+            return res
+
+        except Exception as e:
+            print(f"Error : {e}")
+
+    else:
+        print("Connection or Database is not found!")
+        res = {
+            "status":"error",
+            "message":"Connection is not Found"
+        }
+        return res 
+
+
+def mssql_fetch_all_databasaes(connection):
+    if connection:
+        try:
+
+            cursor = connection.cursor()
+
+            databases = "sys.databases"
+
+            cursor.execute(f"SELECT NAME FROM {databases}")
+
+            print("MSSQL Databases :")
+            print("------------------")
+
+            for row in cursor:
+                print("*",row[0])
+            # database = cursor.fetchall()
+            databases = cursor.fetchall()
+       
+
+            database_name = "AdventureWorks2022"
+            mssql_select_one_database(connection, database_name)
+
+            # mssql_users_list(connection, database_name)
+
+            username = "dbo"
+            # mssql_user_permission(connection, database_name, username)
+
+            res = {
+                    "status" : "success",
+                    "message" : "Successfully Fetched Databases"
+                    }
+            return res 
+   
+        except Exception as e:
+            print(f"Error : {e}")
+    else:
+        print("Connection is not found")
+        res = {
+            "status":"error",
+            "message":"Connection is not Found"
+        }
+        return res
+
+
+#mssql test connection checking
+def mssql_connection(data):
+    print("---------------------------")
+    print("Welcome mssql connections")
+    print("---------------------------")
+    if data:
+        host = data['host']
+        # port = data['port']
+        username = data['username']
+        password = data['password']
+        # print("Welcome mssql function****************", host, username, password)
+
+
+        #mssql connection 
+        try:
+            connection = pymssql.connect(
+                host = host,
+                user = username,
+                password = password,
+            )
+
+            if connection:
+                mssql_fetch_all_databasaes(connection)
+                res = {
+                        "status" : "success",
+                        "message" : "Successfully Connected"
+                    }
+                return res 
+
+        except Exception as e:
+            print('except is working',e)
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+        }
+        return res
+
+
+
+
+def postgresql_bottom_10_datas(connection, schema, table_name):
+    if connection and schema and table_name:
+        try:
+            cursor = connection.cursor()
+
+            cursor.execute(f"SELECT * FROM {table_name} ORDER BY starelid ASC LIMIT 10")
+            field = cursor.fetchall()
+
+            for fields in field:
+                print("\n Datas :",fields) 
+
+        except Exception as e:
+            print('except is working',e)
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+        }
+        return res
+
+
+def postgresql_top_10_datas(connection, schema, table_name):
+
+    if connection and schema and table_name:
+        try:
+            cursor = connection.cursor()
+
+            query = (f"SELECT * FROM {table_name} LIMIT 10")
+
+            cursor.execute(query)
+
+            rows = cursor.fetchall()
+            for row in rows:
+                print("\n Datas : ",row)    
+
+        except Exception as e:
+            print('Except is working',e)
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection or Schema or Table_name is not Found"
+        }
+        return res
+
+
+def postgresql_one_table_all_datas(connection, schema, table_name):
+
+    if connection and schema and table_name:
+        try:
+            cursor = connection.cursor()
+
+            cursor.execute(f"select * from {table_name}")
+            field = cursor.fetchall()
+
+            for fields in field:
+                print("\n Datas :",fields) 
+
+        except Exception as e:
+            print('except is working',e)
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+        }
+        return res
+
+
+def postgresql_datas_description(connection, schema, table_name):
+
+    if connection and table_name:
+        try:
+            cursor = connection.cursor()
+
+            query = (f"SELECT * FROM {table_name} LIMIT 1")
+            cursor.execute(query)
+            # Fetch one row 
+            cursor.fetchone()
+
+            # find the coulumn discription using description() in build function
+            column_names = [desc[0] for desc in cursor.description]
+            print('---------------------------')
+            print("Column names in the table:")
+            print('---------------------------')
+
+            for name in column_names:
+                print(name)
+
+        except Exception as e:
+            print(f"Error: {e}")
+
+    else:
+        print("Database connection or Tablename is not found")
+        res = {
+            "status":"error",
+            "message":"Database Connetction or Table is not Found!"
+        }
+        return res
+
+
+def postgresql_fetch_one_schema_nd_tables(connection, schema):
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute(f"select table_schema, table_name from {schema}.tables ")
+            tables = cursor.fetchall()
+            print("Selected Schema :",schema)
+            print("\nTables:")
+            for table in tables:
+                print(f"Schema : {schema}, Table : {table}")
+            
+            table_name = "pg_statistic"
+            postgresql_datas_description(connection, schema, table_name)
+            # postgresql_one_table_all_datas(connection, schema, table_name)
+            # postgresql_top_10_datas(connection, schema, table_name)
+            # postgresql_bottom_10_datas(connection, schema, table_name)
+            postgresql_random_access_data(connection, schema, table_name)
+
+        except Exception as e:
+            print('except is working',e)
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+        }
+        return res
+
+
+def postgresql_fetch_all_databasess(connection):
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("select schema_name from information_schema.schemata")
+            schemas = cursor.fetchall()
+            print("Databases :")
+            print("-----------")
+            for schema in schemas:
+                print(schema[0])
+            
+            schema_data = "information_schema"
+            postgresql_fetch_one_schema_nd_tables(connection, schema_data)
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def postgresql_users_list(connection):  
+    database = "information_schema"
+    if connection and database:
+        try:
+            cursor = connection.cursor()
+
+            query = """
+            SELECT
+                usename AS username
+            FROM
+                pg_user;
+            """
+
+            
+            cursor.execute(query)
+
+            
+            users = cursor.fetchall()
+
+            
+            for user in users:
+                print(user)
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def postgresql_user_permission(connection):  
+
+    database = "information_schema"
+
+    if connection and database:
+
+        try:
+
+            cursor = connection.cursor()
+
+            query = """
+            SELECT
+                grantee AS username,
+                table_catalog AS database_name,
+                table_schema AS schema_name,
+                table_name AS table_name,
+                privilege_type AS privilege
+            FROM
+                information_schema.role_table_grants
+            ORDER BY
+                username, table_schema, table_name;
+            """
+
+            cursor.execute(query)
+
+           
+            permissions = cursor.fetchall()
+            for perm in permissions:
+                print(f"User: {perm[0]}, Database: {perm[1]}, Schema: {perm[2]}, Table: {perm[3]}, Privilege: {perm[4]}")
+
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def postgresql_connection(data = {}):
+    if data:
+        host = data['host']
+        port = data['port']
+        user = data['user']
+        password = data['password']
+        print("Welcome postgresql function****************", host, port, user, password)
+
+
+        #postgresql connection 
+        try:
+            connection = psycopg2.connect(
+                host = host,
+                user = user,
+                password = password,
+                port = port 
+            )
+
+            if connection:
+                postgresql_users_list(connection)
+                postgresql_user_permission(connection)
+                # postgresql_fetch_all_databasess(connection)
+                res = {
+                    "status":"success",
+                    "message":"Database is Successfully Connected"
+                }
+
+                return res 
+            
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+
+        }
+        return res
+
+
+def oracle_user_list(connection, cursor):
+    if connection and cursor:
+        print(cursor)
+        try:
+
+            query = "SELECT username FROM dba_users"  
+
+            cursor.execute(query)
+
+            users = cursor.fetchall()
+            print("------------")
+            print('Users List')
+            print("-----------")
+            for user in users:
+                print("* ",user[0])
+
+        except Exception as e:
+            print(f"Error: {e}")
+    else:
+        res = {
+            "status":"error",
+            "message":"Connection or Cursor  is not Found"
+
+        }
+        return res 
+
+
+def oracle_all_databases(connection, cursor):
+    print("###############################")
+
+
+def oracle_permission_list(connection, cursor):
+    if connection and cursor:
+        try:
+            query = """
+                    SELECT grantee, privilege
+                    FROM dba_sys_privs
+                    ORDER BY grantee
+                """
+
+            cursor.execute(query)
+            permissions = cursor.fetchall()
+            print("------------")
+            print('Permissions List')
+            print("-----------")
+            for permission in permissions:
+                print(f"User : {permission[0]}, Permission : {permission[1]}")
+
+        except Exception as e:
+            print(f"Error: {e}")
+    else:
+        res = {
+            "status":"error",
+            "message":"Data is not Found"
+
+        }
+        return res 
+
+
+def oracle_connection(data = {}):
+    print("@@@@@@@@@@@@@@@@@@@", data)
+    print('welcome oracle connection')
+
+    if data:
+        host = data['host']
+        port = data['port']
+        user = data['username']
+        password = data['password']
+        print("Welcome postgresql function****************", host, port, user, password)
+        
+        
+        try:
+            dsn_tns = cx_Oracle.makedsn('172.16.230.155', '1521', service_name='')
+            connection = cx_Oracle.connect(user='system', password='K2Mmkmfi3B', dsn=dsn_tns)
+            cursor = connection.cursor()
+            print(cursor)
+
+            query = "SELECT name FROM v$database"
+
+            # Execute the query
+            cursor.execute(query)
+
+            # Fetch and print the result
+            database_name = cursor.fetchall()
+            print(database_name)
+            # for database in database_name:
+            #     print("*", database)
+
+            # query = """
+            #     SELECT service_name
+            #     FROM v$services
+            #     ORDER BY service_name
+            # """
+
+            # Execute the query
+            cursor.execute(query)
+
+            # Fetch and print the results
+            print("Available Services:")
+            for row in cursor.fetchall():
+                print(row[0])
+
+
+            # query = """
+            #     SELECT owner, table_name
+            #     FROM all_tables
+            #     ORDER BY owner, table_name
+            # """
+
+            # cursor.execute(query)
+
+            # print("Tables accessible to the current user:")
+            # for row in cursor.fetchall():
+            #     print(f"Owner: {row[0]}, Table: {row[1]}")
+
+            query = "SELECT username FROM dba_users ORDER BY username"
+            cursor.execute(query)
+            
+            # Fetch and print the results
+            print("All users (owners) in the database:")
+            for row in cursor.fetchall():
+                print(row[0])
+            # oracle_user_list(connection, cursor)
+            # oracle_permission_list(connection, cursor)
+            oracle_all_databases(connection, cursor)
+            
+        except Exception as e:
+            print(f"Error: {e}")
+
+
+def users_permissions(client):
+    print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@ hiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii")
+    admin_db = client['admin']
+
+    # Retrieve user information
+    users_info = admin_db.command('usersInfo')['users']
+
+    # Process and display user information with roles
+    for user in users_info:
+        user_name = user.get('user', 'Unknown User')
+        roles = user.get('roles', [])
+        
+        # Convert roles to a readable format
+        role_descriptions = [f"{role.get('role', 'Unknown Role')} in {role.get('db', 'Unknown DB')}" for role in roles]
+        
+        print(f"User: {user_name}")
+        print("Roles:")
+        for role_desc in role_descriptions:
+            print(f" - {role_desc}")
+        print()
+
+
+def user_role_list(client):
+    admin_db = client['admin']
+
+    users = admin_db.command('usersInfo')['users']
+            
+    for user in users:
+        print(f"User: {user['user']}, Roles: {user['roles']}")
+    # if client:
+        
+        # db = client['admin']  # Replace with your database name
+
+        # # Access the permissions collection
+        # permissions_collection = db['system.users']  # Replace with your permissions collection name
+
+        # # Fetch and display all permissions
+        # print("------------------")
+        # print("Permissions list:")
+        # print("-----------------")
+        # for permission in permissions_collection.find():
+        #     print("*",permission)
+
+
+def mongodb_fetch_all_databases(client):
+    if client:
+        try:
+            databases = client.list_database_names()
+
+            print("Databases:")
+            for db in databases:
+                print(db)
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def mongodb_fetch_one_databse_and_all_tables(client):
+
+    if client:
+        try:
+            db_name = "admin"
+            database = client[db_name]
+            print(f"Fetched to database: {database.name}")
+
+            collections = database.list_collection_names()
+
+            print("----------------------------------")
+            print("Collections (tables) in database:")
+            print("----------------------------------")
+
+            for collection in collections:
+                print("* ",collection)
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def mongodb_table_discription(client):
+    if client:
+        try:
+            db_name = 'admin'  
+            database = client[db_name]
+
+            collection_name = 'system.users'  
+            collection = database[collection_name]
+
+            sample_documents = collection.find().limit(7)  
+
+            field_names = set()
+
+            for document in sample_documents:
+                field_names.update(document.keys())
+
+            print("------------------------------------------------")
+            print(f"Field names in collection '{collection_name}':")
+            print("------------------------------------------------")
+
+            for field in field_names:
+                print("*",field)
+
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def mongodb_display_all_datas(client, database, table):
+    if client:
+        try:
+            print('#################################', table)
+            db = database  
+            collection = table  
+
+            for document in collection.find():
+                print("\n",document)
+                
+        except Exception as e:
+            res = {
+                "status":"error",
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":"error",
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+def mongodb_top_10_datas(client):
+    print('***********************************')
+    db = client['admin']  
+    collection = db['system.users']  
+
+    # total_docs = collection.count_documents({})
+
+    # skip_count = max(0, total_docs - 10)  
+
+    # bottom_documents = collection.find().sort('_id', 1).skip(skip_count).limit(10)
+
+    # print("Bottom 10 documents:")
+    # for doc in bottom_documents:
+    #     print(doc)
+
+    total_docs = collection.count_documents({})
+
+    # Define the number of documents you want to fetch randomly
+    num_docs_to_fetch = 10  # Replace with your desired number
+
+    # Ensure that num_docs_to_fetch does not exceed the number of documents
+    num_docs_to_fetch = min(num_docs_to_fetch, total_docs)
+
+    # Fetch random documents
+    random_docs = []
+    for _ in range(num_docs_to_fetch):
+        skip_count = random.randint(0, total_docs - 1)
+        doc = collection.find().skip(skip_count).limit(1)
+        random_docs.extend(doc)
+
+    # Print the random documents
+    print("Random documents:")
+    for doc in random_docs:
+        print(doc)
+
+
+def mongodb_connection(data = {}):
+    if data:
+        host = data['host']
+        port = data['port']
+        username = data['username']
+        password = data['password']
+        try:
+            connection_string = f'mongodb://{username}:{password}@{host}:{port}/'
+            client = MongoClient(connection_string)
+            print("Mongodb connected")
+
+            
+            db_name = 'admin'  
+            database = client[db_name]
+
+            collection_name = 'system.users'  
+            collection = database[collection_name]
+
+            user_role_list(client)
+            users_permissions(client)
+            mongodb_fetch_all_databases(client)
+            mongodb_fetch_one_databse_and_all_tables(client)
+            mongodb_table_discription(client)
+            mongodb_display_all_datas(client, database, collection)
+            mongodb_top_10_datas(client)
+
+        except Exception as e:
+                print(f"Error: {e}")
+        
+        finally:
+            client.close()
+            print("Connection closed.")
+
+
+#test connection to the server/cloud
+def test_connection(data = {}):
+
+
+    if data:
+        check_uid = data.get('uid','')
+        password = None
+        if check_uid:
+            if data['password']:
+                response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                if response is not None:
+                    password = response
+                else:
+                    password = data['password']
+        else:
+            password = data.get('password', '')
+        host = data['host']
+        port = data['port']
+        username = data['username']
+        password = response
+        database = data['database']
+        
+    
+        if database == "mysql":
+            try:
+                connection = mysql.connector.connect(
+                    host = host,
+                    username = username,
+                    password = password,
+                    port = port 
+                )
+                if connection.is_connected():
+                    res = {
+                        "status" : 1,
+                        "message" : "Successfully Connected"
+                    }
+                    return res 
+            except Exception as e:
+                res = {
+                    "status" : 0,
+                    "message" : f"Database Conection is failed.Error: {str(e)}"
+                }
+                return res 
+            # finally:
+            #     if connection.is_connected():
+            #             connection.close()
+            #             print("MySQL connection is closed")
+
+
+        elif database == "mssql":
+        
+            try:
+                connection = pymssql.connect(
+                    host = host,
+                    user = username,
+                    password = password,
+                )
+
+                if connection:
+                    res = {
+                            "status" : 1,
+                            "message" : "Successfully Connected"
+                        }
+                    return res 
+
+            except Exception as e:
+                res = {
+                    "status" : 0,
+                    "message" : f"Database is not Conneted. Error: {str(e)}"
+                } 
+                return res  
+            # finally:
+            #     if connection:
+            #         connection.close()
+            #         print("MSSQL connection is closed")
+
+
+        elif database == "postgresql":
+            # connection = None
+            try:
+                connection = psycopg2.connect(
+                    host = host,
+                    user = username,
+                    password = password,
+                    port = port
+                )
+                if connection:
+                    res = {
+                        "status": 1,
+                        "message": "Database is Successfully Connected"
+                    }
+                    return res
+            except Exception as e:
+                res = {
+                    "status": 0,
+                    "message": f"Database is not connected. Error: {str(e)}"
+                }
+                return res
+            # finally:
+            #     if connection:
+            #         connection.close()
+            #         print("Postgresql connection is closed")
+
+
+        elif database == "oracle":
+
+            try:
+                dsn_tns = cx_Oracle.makedsn(host, port, service_name='')
+                connection = cx_Oracle.connect(user = username, password = password, dsn=dsn_tns)
+                if connection :
+                        
+                        res = {
+                            "status": 1,
+                            "message": "Database Connected"
+                        }
+                        return res 
+                
+            except Exception as e:
+                res = {
+                    "status" : 0,
+                    "message" : f"Database not Connected. Error: {str(e)}"
+                }
+                return res
+
+
+        elif database == "mongodb":
+            
+            try:
+                connection_string = f'mongodb://{username}:{password}@{host}:{port}/'
+                client = MongoClient(connection_string)
+
+                if client:
+                    res = {
+                            "status" : 1,
+                            "message" : f"Database Connected. Error: {str(e)}"
+                        }
+                    return res
+
+            except Exception as e:
+                print(f"Error: {e}")
+                res = {
+                    "status" : 0,
+                    "message" : f"Database not Connected. Error: {str(e)}"
+                }
+                return res
+            
+            # finally:
+            #     client.close()
+            #     print("Connection closed.")
+            #     return res  
+                 
+        elif host == data.get('host') and port == data.get('port') and username == data.get('username') and password == response:
+            res = {
+                    "status" : 1,
+                    "message" : "Database Connected"
+                }
+            return res       
+    
+    else:
+        res = {
+            "status" : "0",
+            "message" : "Database Conection is failed"
+
+        }
+        print(res)
+        return res 
+
+
+#this function will be called before main running main function
+def test_connection_before_run():
+    
+    print("Testing connection before run")
+    response = test_connection()
+    pluginName = get_config_data()['pluginName']
+    if response:
+        if response.get('status', '') == '0':
+            data = {
+                "alertType": "plugin",
+                "code": "codeforsystemalert",
+                "name": "",
+                "desc": "",
+                "label": "",
+                "usage": "",
+                "showBadge": 1,
+                "toEmail": 1,
+                "additionalFields": {
+                    "PluginId": pluginName,
+                },
+                "lastUpdatedTime": datetime.now().strftime("%s")
+            }
+            # ls_common.insertSystemAlerts(data)
+
+
+def get_database_names(connection):
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SELECT datname FROM pg_database;")
+            databases = cursor.fetchall()
+            filtered_databases = [db[0] for db in databases if db[0] not in ('template0', 'template1')]
+            res = {
+                    "status" : 1,
+                    "data" : filtered_databases
+                    }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def display_schemas(connection, database):
+    if connection and database:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SELECT schema_name FROM information_schema.schemata ORDER BY schema_name")   
+            schemas = cursor.fetchall()
+            filtered_schema = [schema[0] for schema in schemas if schema[0] not in ('information_schema', 'pg_catalog', 'pg_toast')]
+            
+            res = {
+                    "status" : 1,
+                    "data" : filtered_schema
+                    }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_tablename(db_connection, schema):
+    
+    if db_connection and schema:
+        try:
+            db_cursor = db_connection.cursor()
+            db_cursor.execute(f"SELECT table_name FROM information_schema.tables WHERE table_schema = '{schema}';")
+            tables = db_cursor.fetchall()
+            tables_to_remove = {'actor_info', 'customer_list', 'sales_by_film', 'staff_list', 'nicer_but_slower_film_list', 'sales_by_film_category', 'sales_by_store', 'film_list'}
+            filtered_tables = [table for table in tables if table[0] not in tables_to_remove]
+            res = {
+                "status" : 1,
+                "data" : filtered_tables
+            }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_coulmn_discription(db_connection, table):
+    if db_connection and table:
+        try:
+            db_cursor = db_connection.cursor()
+            db_cursor.execute(f"SELECT column_name, data_type, is_nullable, character_maximum_length FROM information_schema.columns WHERE table_name = '{table}'")
+            all_discription = db_cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : all_discription
+            }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_all_datas(db_connection, schema, table):
+    
+    if db_connection and table:
+        try:
+        
+            db_cursor = db_connection.cursor()
+            db_cursor.execute(F"SELECT * FROM {table}")
+            all_field = db_cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : all_field
+            }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+
+def display_top_10_datas(db_connection, schema_name,table):
+    if db_connection and table:
+        try:
+            db_cursor = db_connection.cursor()
+            db_cursor.execute(F"SELECT * FROM {table} LIMIT 10")
+            top_10_field = db_cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : top_10_field
+            }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+
+def ddr_check_database(list_files: list) -> dict:
+    """
+    The API Call Second End Point into DDR new Product
+    """
+    if list_files:
+        url = 'http://localhost:5050/rdd/backend/v1/check-databases'
+        try:
+            response = requests.post(url, json = list_files)
+            
+            print('**********************the response for ddr',response)
+            
+            response_text = json.loads(response.text)
+            # print(response_text)
+
+            # response_data = response.json()
+            # # print(response_data)
+
+            if response.status_code == 200:
+
+                res = {
+                    "status": 1,
+                    "message": "Success",
+                    "files": response_text
+                }
+                return res
+            else:
+                res = {
+                    "status": 0,
+                    "message": "Error"
+                }
+                return res
+        except requests.exceptions.HTTPError as errh:
+            # if response.status_code == 404:
+            res = {
+                "status": 0,
+                "message": str(errh)
+            }
+            print(errh)
+            return res
+        except requests.exceptions.ReadTimeout as errrt:
+            # if response.status_code == 500:
+            res = {
+                "status": 0,
+                "message": str(errrt)
+            }
+            print(errrt)
+            return res
+        except requests.exceptions.ConnectionError as conerr:
+            res = {
+                "status": 0,
+                "message": str(conerr)
+            }
+            print(conerr)
+            return res
+        except requests.exceptions.RequestException as errex:
+            res = {
+                "status": 0,
+                "message": str(errex)
+            }
+            print(errex)
+            return res
+    else:
+        res = {
+            "status": 0,
+            "message": "Data is not Found"
+        }
+        return res
+
+def ddr_insert_database(list_files: list) -> dict:
+    print("reacheddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+    """
+    The API Call Second End Point into DDR new Product
+    """
+    if list_files:
+        url = 'http://localhost:5050/rdd/backend/v1/insert-database-details'
+        try:
+            # print(list_files)
+            response = requests.post(url, json = list_files)
+            print('2nd api ',response.content)
+
+            if response.status_code == 200:
+                res = {
+                    "status": 1,
+                    "message": "Success",
+                    "files": response
+                }
+                return res
+            else:
+                res = {
+                    "status": 0,
+                    "message": "Error"
+                }
+                return res
+        except requests.exceptions.HTTPError as errh:
+            res = {
+                "status": 0,
+                "message": str(errh)
+            }
+            print(errh)
+            return res
+        except requests.exceptions.ReadTimeout as errrt:
+            res = {
+                "status": 0,
+                "message": str(errrt)
+            }
+            print(errrt)
+            return res
+        except requests.exceptions.ConnectionError as conerr:
+            res = {
+                "status": 0,
+                "message": str(conerr)
+            }
+            print(conerr)
+            return res
+        except requests.exceptions.RequestException as errex:
+            res = {
+                "status": 0,
+                "message": str(errex)
+            }
+            print(errex)
+            return res
+    else:
+        res = {
+            "status": 0,
+            "message": "Data is not Found"
+        }
+        return res
+
+def psql_user_permission(connection, schema, database):  
+    if connection :
+        try:
+            cursor = connection.cursor()
+
+            query = """
+           SELECT
+                r.oid AS user_id,
+                g.grantee AS username,
+                g.table_catalog AS database_name,
+                g.table_schema AS schema_name,
+                g.table_name AS table_name,
+                g.privilege_type AS privilege
+            FROM
+                information_schema.role_table_grants g
+            JOIN
+                pg_roles r ON g.grantee = r.rolname
+            WHERE
+                g.table_schema = 'public'
+            ORDER BY
+                username, table_schema, table_name
+            """
+            
+
+
+            cursor.execute(query)
+            permissions = cursor.fetchall()
+
+            total_user = []
+
+            
+            for perm in permissions:
+
+                permission_data = {
+                    "user_id": perm[0],
+                    "user_name": perm[1],
+                    "user_type": "",
+                    "create": 0,
+                    "read": 0,
+                    "update": 0,
+                    "delete": 0,
+                    "share": 0,
+                    "data": {
+                    "role": "",
+                    "category": "",
+                    "role_id": ""
+                    }
+                }
+                if perm[5] == 'DELETE':
+                    permission_data['delete'] = 1
+                elif perm[5] == 'INSERT':
+                    permission_data['create'] = 1
+                elif perm[5] == 'UPDATE':
+                    permission_data['update'] = 1
+                elif perm[5] == 'SELECT':
+                    permission_data['read'] = 1
+
+                total_user.append(permission_data)  
+                print(total_user)
+            res = {
+            "status":1,
+            "data":total_user
+        }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            print(res)
+    else:
+        res = {
+            "status":0,
+            "message":"Database Connection is not Found!"
+
+        }
+        print(res)
+        return res
+
+
+
+def display_psql_top_10_datas(db_connection, database_name, table_name, length, start , column):
+    print( table_name)
+    if db_connection and database_name and table_name :
+        try:
+            db_cursor = db_connection.cursor()
+            query = f"select * from {table_name} limit {length} offset {start}"
+            db_cursor.execute(query)
+            top_10_datas = db_cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : top_10_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_psql_bottom_10_datas(db_connection, database_name, table_name, length, start , column , ids):    
+  
+    if db_connection and database_name and table_name :
+        try:
+            db_cursor = db_connection.cursor()
+            query = f"SELECT * FROM {table_name} ORDER BY {ids} DESC LIMIT {length}"
+            # query = f"select * from {table_name} order by 'actor_id' desc limit 10"
+            db_cursor.execute(query)
+            bottom_10_datas = db_cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : bottom_10_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res  
+
+def postgresql_random_access_data(connection, database, table_name, length, start , val):
+    
+    if connection and database and table_name:
+        try:
+            cursor = connection.cursor()
+
+            cursor.execute(f"SELECT * FROM {table_name} ORDER BY RANDOM() LIMIT {length}")
+            random_field = cursor.fetchall()
+
+            res = {
+                    "status" : 1,
+                    "data" : random_field
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def display_rows_with_index_access(db_connection, database, table, length, start , val, ids):
+    print("#####################")
+    print(database, table, ids, length)
+    # exit()
+    # try:
+        
+    #     # query = f"""
+    #     #     SELECT * FROM {table_name} WHERE id >= {ids} LIMIT {length}
+    #     # """
+        
+    #     cursor = connection.cursor()
+    #     cursor.execute(f"SELECT * FROM {table_name} WHERE id >= {ids} LIMIT {length}")
+    #     index_field = cursor.fetchall()
+    #     res = {
+    #             "status" : 1,
+    #             "data" : index_field
+    #         }
+    #     return res 
+    # except Exception as e:
+    #     res = {
+    #         "status":0,
+    #         "message":str(e)
+    #     }
+    #     return res
+        
+    
+def display_psql_coulums_discriptions(db_connection, database_name, table_name):
+    
+    if db_connection and database_name and table_name:
+        
+        try:
+            db_cursor = db_connection.cursor()
+            
+            query=db_cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = '{}'".format(table_name))
+            
+            all_discription = db_cursor.fetchall() 
+            if all_discription:
+                
+                res = {
+                    "status" : 1,
+                    "data" : all_discription
+                }
+                return res 
+            else:
+                # print('No data in table')
+                res = {
+                    "status" : 0,
+                    "data" : all_discription
+                }   
+                return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+
+
+def display_psql_user_permission(db_connection, database_name, table_name):
+    if db_connection and database_name and table_name:
+        try:  
+            db_cursor = db_connection.cursor()
+            db_cursor.execute(f"""SELECT
+                r.oid AS user_id,
+                g.grantee AS username,
+                g.table_catalog AS database_name,
+                g.table_schema AS schema_name,
+                g.table_name AS table_name,
+                g.privilege_type AS privilege
+            FROM
+                information_schema.role_table_grants g
+            JOIN
+                pg_roles r ON g.grantee = r.rolname
+            WHERE
+                g.table_catalog = '{database_name}' AND  
+                g.table_name = '{table_name}' AND      
+                g.table_schema = 'public'        
+            ORDER BY
+                username, schema_name, table_name;
+            """)
+            users_permissions = db_cursor.fetchall()
+            
+            total_user = []
+
+            for perm in users_permissions:
+
+                permission_data = {
+                        "user_id": str(perm[0]),
+                        "user_name": perm[1],
+                        "user_type": "",
+                        "create": 0,
+                        "read": 0,
+                        "update": 0,
+                        "delete": 0,
+                        "share": 0,
+                        "data": {
+                        "role": "",
+                        "category": "",
+                        "role_id": ""
+                        }
+                    }
+                if perm[5] == 'DELETE':
+                    permission_data['delete'] = 1
+                elif perm[5] == 'INSERT':
+                    permission_data['create'] = 1
+                elif perm[5] == 'UPDATE':
+                    permission_data['update'] = 1
+                elif perm[5] == 'SELECT':
+                    permission_data['read'] = 1
+                total_user.append(permission_data)  
+                # print(total_user)
+                # exit()
+            res = {
+                    "status" : 1,
+                    "data" : total_user
+                }
+            return res 
+        except Exception as e:
+            
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+        
+    
+def psql_create_connection(data):
+    if data:
+        try:
+            password = None
+            check_uid = data.get('uid')
+            if check_uid:
+                if data['password']:
+                    response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                    if response is not None:
+                        password = response
+                    else:
+                        password = data['password']
+            else:
+                password = data.get('password', '')
+            connection = psycopg2.connect(
+                user = data.get('username'),
+                password = password,
+                host =  data.get('host'),
+                port =data.get('port')
+            )
+            res = {
+                "status" : 1,
+                "data" : connection
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+def fetch_primary_keys(db_connection, database, table):
+    try:
+      
+        cursor = db_connection.cursor()
+        
+        cursor.execute("""
+            SELECT 
+                tc.table_name, 
+                kcu.column_name
+            FROM 
+                information_schema.table_constraints AS tc 
+            JOIN 
+                information_schema.key_column_usage AS kcu 
+                ON tc.constraint_name = kcu.constraint_name
+            WHERE 
+                tc.constraint_type = 'PRIMARY KEY' 
+                AND tc.table_schema = 'public';  
+        """)
+        
+        primary_keys = cursor.fetchall()
+        ids = []
+        for i in primary_keys:
+            ids.append(i[1])
+        
+        return ids
+            
+    except Exception as e:
+        print("Error fetching primary keys:", str(e))
+    
+def postgresql_main(data):
+
+    if data:
+    # try:
+       
+        connection = psql_create_connection(data)
+       
+        if connection['status'] == 1:
+            cursor = connection['data'].cursor()
+            databases = get_database_names(connection['data'])
+           
+            if databases['status'] == 1:
+                check_uid = data.get('uid','')
+                password = None
+                if check_uid:
+                    if data['password']:
+                        response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                        if response is not None:
+                            password = response
+                        else:
+                            password = data['password']
+                else:
+                    password = data.get('password', '')
+                for database in databases['data']:
+                    if database:
+                        print(database)
+                        db_connection = psycopg2.connect(database = database, user = data.get('username'), password = password, host = data.get('host'), port = data.get('port') )
+                        db_cursor = db_connection.cursor()
+                        schemas = display_schemas(connection['data'], database)
+                        if schemas['status'] == 1:
+                            if schemas:
+                                for schema in schemas['data']:
+                                    # print(schema)
+                                    tables = display_tablename(db_connection, schema)
+                                    
+                                    if tables['status'] == 1: 
+                                        values = tables['data']
+                                        if values:     
+                                            data_ = []
+                                            list_files = {}
+                                            for table in values:
+                                                print(table[0])
+                                                data_.append({'table_name': table[0] , 'database_name' : database, 'database_path':'', 'source':'postgresql'})   
+                                            list_files['db_list'] = data_
+                                            # print("!!!!!!!!!!!!!!!!!!!!!!!!!!",list_files)
+                                            first_api = ddr_check_database(list_files)
+                                           
+                                      
+                                            if first_api['status'] == 1:
+                                                response_value = first_api['files']
+                                                # print("@@@@@@@@@@@@", response_value)
+                                                files = response_value.get('files')
+                                                
+                                                query_type = response_value.get('query_type')
+                                                if query_type:
+                                                    pattern = query_type.get('pattern')
+                                                    length = query_type.get('length')
+                                                    start = query_type.get('start')
+                                                for file in files:
+                                                    table_name = file.get('table_name')
+                                                    database_name = file.get("database_name")
+                                            
+                                              
+                                                    user_permission_res = display_psql_user_permission(db_connection, database_name, table_name)
+                                                            
+                                                
+                                                    if user_permission_res['status'] == 1:
+                                                        user_permission = user_permission_res['data']   
+                                                    elif user_permission_res['status'] == 0:
+                                                        user_permission = []
+
+                                                    if pattern == 'top':
+                                                    
+                                                        column_discription_res  = display_psql_coulums_discriptions(db_connection, database_name, table_name)
+                                                        # print("#################",column_discription_res['data'])
+                                                        
+                                                        if column_discription_res['status'] == 1:
+                                                            
+                                                            parsed_columns = []
+                                                            for column in column_discription_res['data']:
+                                                                parsed_columns.append(column[0])
+                                                            val = '"'
+                                                            val =val+ '","'.join(parsed_columns)+'"'
+                                                            
+                                                            top_10_datas  = display_psql_top_10_datas(db_connection, database_name, table_name, length, start , val)
+                                                            # print(user_permission)
+                                                            if top_10_datas['status'] == 1:
+                                                                result = []
+                                                                for rows in top_10_datas['data']:
+                                                                    data__ = {} 
+                                                                    for col in range(len(rows)):
+                                                                        data__[parsed_columns[col]] =  str(rows[col])
+                                                                    result.append(data__)
+                                                                json_data = json.dumps(result)
+                                                                print(result)
+                                                                if top_10_datas:
+                                                                    db_content = {}
+                                                                    db_permissions={}
+                                                                    db_permissions['db_permissions'] = user_permission
+                                                                    db_content['database_content'] = result
+                                                                    data = {
+                                                                    "db_details": {
+                                                                        "table_name": str(table_name),
+                                                                        "database_name": str(database_name),
+                                                                        "path": "",
+                                                                        "schema": str(schema),
+                                                                        "size": 0,
+                                                                        "created_at": 1728297642,
+                                                                        "accessed_at": 1728384056,
+                                                                        "modified_at": 1728384056,
+                                                                        "source": "postgresql",
+                                                                        "db_permissions": db_permissions,
+                                                                        "sensitivity": "",
+                                                                        "category": "",
+                                                                        "risk_level": "",
+                                                                        "pattern_match": "",
+                                                                        "compliance": "",
+                                                                        "classification": "",
+                                                                        "pii_contained": "",
+                                                                        "phi_contained": "",
+                                                                        "pci_contained": "",
+                                                                        "permission_type": "none",
+                                                                        "rot_data": 0
+                                                                    },
+                                                                    "db_content": db_content
+                                                                    }
+                                                                    
+                                                                    res = ddr_insert_database(data)
+                                                                    if res['status'] == 1:
+                                                                        print(res)
+
+                                                         # if pattern == 'bottom':
+                                                        #     column_discription_res  = display_psql_coulums_discriptions(db_connection, database_name, table_name[0])
+                                                            
+                                                        #     if column_discription_res['status'] == 1:
+                                                        #         parsed_columns = []
+                                                        #         for column in column_discription_res['data']:
+                                                        #             parsed_columns.append(column[0])
+                                                        #         val = '"'
+                                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                                        #         colum_id_details = fetch_primary_keys(db_connection, database_name, table_name)
+                                                                
+                                                        #         for ids in colum_id_details:
+                                                        #             bottom_10_datas = display_psql_bottom_10_datas(db_connection, database_name, table_name[0], length, start , val, ids)   
+                                                                
+                                                        #             if bottom_10_datas['status'] == 1:
+                                                        #                 result = []
+                                                        #                 for rows in bottom_10_datas['data']:
+                                                        #                     data__ = {} 
+                                                        #                     for col in range(len(rows)):
+                                                        #                         data__[parsed_columns[col]] =  str(rows[col])
+                                                        #                     result.append(data__)
+                                                        #                 json_data = json.dumps(result)
+                                                        #                 if bottom_10_datas:
+                                                        #                     db_content = {}
+                                                        #                     db_content['database_content'] = result
+                                                        #                     data = {
+                                                        #                     "db_details": {
+                                                        #                         "table_name": str(table[0]),
+                                                        #                         "database_name": str(database),
+                                                        #                         "path": "",
+                                                        #                         "schema": str(schema),
+                                                        #                         "size": 0,
+                                                        #                         "created_at": 1234567865,
+                                                        #                         "accessed_at": 6543321345,
+                                                        #                         "modified_at": 7654321342,
+                                                        #                         "source": "db_postgresql",
+                                                        #                         "db_permissions": user_permission,
+                                                        #                         "sensitivity": "",
+                                                        #                         "category": "",
+                                                        #                         "risk_level": "",
+                                                        #                         "pattern_match": "",
+                                                        #                         "compliance": "",
+                                                        #                         "classification": "",
+                                                        #                         "pii_contained": "",
+                                                        #                         "phi_contained": "",
+                                                        #                         "pci_contained": "",
+                                                        #                         "permission_type": "",
+                                                        #                         "rot_data": 0
+                                                        #                     },
+                                                        #                     "db_content": db_content
+                                                        #                     }
+                                                        #                     res = ddr_insert_database(data)
+                                                        #                     if res['status'] == 1:
+                                                        #                         print(res)
+
+                                                        # if pattern == 'random':
+                                                            
+                                                        #     column_discription_res  = display_psql_coulums_discriptions(db_connection, database, table[0])
+                                                        #     if column_discription_res['status'] == 1:
+                                                        #         parsed_columns = []
+                                                        #         for column in column_discription_res['data']:
+                                                        #             parsed_columns.append(column[0])
+                                                        #         val = '"'
+                                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                                        #         random_10_datas  = postgresql_random_access_data(db_connection, database, table, length, start , val)
+                                                        #         if random_10_datas['status'] == 1:
+                                                        #             result = []
+                                                        #             for rows in random_10_datas['data']:
+                                                        #                 data__ = {} 
+                                                        #                 for col in range(len(rows)):
+                                                        #                     data__[parsed_columns[col]] =  str(rows[col])
+                                                        #                 result.append(data__)
+                                                        #             json_data = json.dumps(result)
+                                                        #             if random_10_datas:
+                                                        #                 db_content = {}
+                                                        #                 db_content['database_content'] = result
+                                                        #                 data = {
+                                                        #                 "db_details": {
+                                                        #                     "table_name": str(table[0]),
+                                                        #                     "database_name": str(database),
+                                                        #                     "path": "",
+                                                        #                     "schema": str(schema),
+                                                        #                     "size": 0,
+                                                        #                     "created_at": 1234567865,
+                                                        #                     "accessed_at": 6543321345,
+                                                        #                     "modified_at": 7654321342,
+                                                        #                     "source": "db_postgresql",
+                                                        #                     "db_permissions": user_permission,
+                                                        #                     "sensitivity": "",
+                                                        #                     "category": "",
+                                                        #                     "risk_level": "",
+                                                        #                     "pattern_match": "",
+                                                        #                     "compliance": "",
+                                                        #                     "classification": "",
+                                                        #                     "pii_contained": "",
+                                                        #                     "phi_contained": "",
+                                                        #                     "pci_contained": "",
+                                                        #                     "permission_type": "",
+                                                        #                     "rot_data": 0
+                                                        #                 },
+                                                        #                 "db_content": db_content
+                                                        #                 }
+                                                        #                 res = ddr_insert_database(data)
+                                                        #                 if res['status'] == 1:
+                                                        #                     print(res)
+
+                                                        # if pattern == 'index':
+                                                            
+                                                        #     column_discription_res  = display_psql_coulums_discriptions(db_connection, database, table[0])
+                                                        #     if column_discription_res['status'] == 1:
+                                                        #         parsed_columns = []
+                                                        #         for column in column_discription_res['data']:
+                                                        #             parsed_columns.append(column[0])
+                                                        #         val = '"'
+                                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                                        #         colum_id_details = fetch_primary_keys(db_connection, database, table)
+                                                        #         for ids in colum_id_details:
+                                                        #             index_10_datas  = display_rows_with_index_access(db_connection, database, table, length, start , val, ids)
+                                                        #             print(index_10_datas)
+                                                        #             exit()
+                                                        #             if index_10_datas['status'] == 1:
+                                                        #                 result = []
+                                                        #                 for rows in index_10_datas['data']:
+                                                        #                     data__ = {} 
+                                                        #                     for col in range(len(rows)):
+                                                        #                         data__[parsed_columns[col]] =  str(rows[col])
+                                                        #                     result.append(data__)
+                                                        #                 json_data = json.dumps(result)
+                                                        #                 if index_10_datas:
+                                                        #                     db_content = {}
+                                                        #                     db_content['database_content'] = result
+                                                        #                     data = {
+                                                        #                     "db_details": {
+                                                        #                         "table_name": str(table[0]),
+                                                        #                         "database_name": str(database),
+                                                        #                         "path": "",
+                                                        #                         "schema": str(schema),
+                                                        #                         "size": 0,
+                                                        #                         "created_at": 1234567865,
+                                                        #                         "accessed_at": 6543321345,
+                                                        #                         "modified_at": 7654321342,
+                                                        #                         "source": "db_postgresql",
+                                                        #                         "db_permissions": user_permission,
+                                                        #                         "sensitivity": "",
+                                                        #                         "category": "",
+                                                        #                         "risk_level": "",
+                                                        #                         "pattern_match": "",
+                                                        #                         "compliance": "",
+                                                        #                         "classification": "",
+                                                        #                         "pii_contained": "",
+                                                        #                         "phi_contained": "",
+                                                        #                         "pci_contained": "",
+                                                        #                         "permission_type": "",
+                                                        #                         "rot_data": 0
+                                                        #                     },
+                                                        #                     "db_content": db_content
+                                                        #                     }
+                                                        #                     res = ddr_insert_database(data)
+                                                        #                     if res['status'] == 1:
+                                                        #                         print(res)
+                                                # else:
+                                                #     print("No files ")
+
+                                            
+
+                                                            
+                                                       
+                        
+                                                        # else:
+                                                        #     print('no files to display')                       
+    # except Exception as e:
+    #     print("Error: ", e)
+
+def mssql_create_connection(data):
+    if data:
+        try:
+            password = None
+            check_uid = data.get('uid')
+            if check_uid:
+                if data['password']:
+                    response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                    if response:
+                        password = response
+                    else:
+                        password = data['password']
+                        
+                    connection = pymssql.connect(
+                        
+                        user = data.get('username'),
+                        password = password,
+                        host =  data.get('host'),
+                    )
+                    res = {
+                        "status" : 1,
+                        "data" : connection
+                    }
+                    return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+    else:
+        print("Data Details is not found!") 
+    
+def mssql_get_all_databases(connection):
+    
+    if connection:
+        cursor = connection.cursor()
+        try:
+            cursor.execute(f"SELECT NAME FROM sys.databases")
+            databases = cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : databases
+            }
+            return res
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            print("Error: ", e)
+    else:
+        print("Data Details is not found!")
+def display_mssql_tables(connection, database, cursor):
+    if connection and database and cursor:
+        try:
+            cursor.execute("select table_name from information_schema.tables ")            
+            tables = cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : tables
+                }
+            return res
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def display_mssql_users_permission(db_connection, db_cursor):
+    if db_connection:
+        
+        try:
+            db_cursor.execute("""
+            SELECT 
+                dp.principal_id AS UserID,
+                dp.name AS UserName,
+                dp.type_desc AS UserType,
+                dp.is_fixed_role AS IsFixedRole,
+                r.name AS RoleName,
+                p.permission_name AS PermissionName,
+                p.state_desc AS PermissionState
+            FROM 
+                sys.database_principals AS dp
+            LEFT JOIN 
+                sys.database_role_members AS drm ON dp.principal_id = drm.member_principal_id
+            LEFT JOIN 
+                sys.database_principals AS r ON drm.role_principal_id = r.principal_id
+            LEFT JOIN 
+                sys.database_permissions AS p ON dp.principal_id = p.grantee_principal_id
+            WHERE 
+                dp.type IN ('S', 'U')  -- S = SQL user, U = Windows user
+            ORDER BY 
+                dp.name, r.name, p.permission_name;
+            """)
+            
+            users_permission = db_cursor.fetchall()
+            
+            total_users_permission = []
+            for perm in users_permission:
+                permission_data = {
+                        "user_id": perm[0],
+                        "user_name": perm[1],
+                        "user_type": perm[2],
+                        "create": 0,
+                        "read": 0,
+                        "update": 0,
+                        "delete": 0,
+                        "share": 0,
+                        "data": {
+                        "role": "",
+                        "category": "",
+                        "role_id": ""
+                        }
+                    }
+                if perm[6] == 'DELETE':
+                    permission_data['delete'] = 1
+                elif perm[6] == 'INSERT':
+                    permission_data['create'] = 1
+                elif perm[6] == 'UPDATE':
+                    permission_data['update'] = 1
+                elif perm[6] == 'SELECT':
+                    permission_data['read'] = 1
+                total_users_permission.append(permission_data)
+                
+                res = {
+                        "status" : 1,
+                        "data" : total_users_permission
+                    }
+                return res
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def  display_mssql_coulums_discriptions(db_connection, db, table, db_cursor):
+     
+    if db_connection and db and table:
+        try:
+            db_cursor.execute(f"""
+            SELECT 
+                c.name AS ColumnName,
+                ep.value AS ColumnDescription
+            FROM 
+                sys.columns AS c
+            JOIN 
+                sys.tables AS t ON c.object_id = t.object_id
+            LEFT JOIN 
+                sys.extended_properties AS ep ON ep.major_id = c.object_id 
+                                            AND ep.minor_id = c.column_id 
+                                            AND ep.name = 'MS_Description'
+            WHERE 
+                t.name = '{table}'  
+            ORDER BY 
+                c.column_id;""")
+            all_discription = db_cursor.fetchall()
+            colum_name = []
+            for i in all_discription:
+                colum_name.append(i[0])
+            res = {
+                    "status" : 1,
+                    "data" : colum_name
+                    }
+            return res
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def display_mssql_top_10_datas(db_connection, db_cursor, database_name, table_name, length, start , column):
+    if db_connection and database_name and table_name:
+        try:
+            db_cursor.execute(f"SELECT TOP {length} * FROM {table_name}")
+            top_10_datas = db_cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : top_10_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_primary_keys(connection, cursor, table):
+    query = """
+    SELECT 
+        kc.name AS PrimaryKeyName,
+        c.name AS ColumnName
+    FROM 
+        sys.key_constraints AS kc
+    JOIN 
+        sys.index_columns AS ic ON kc.object_id = ic.object_id
+    JOIN 
+        sys.columns AS c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+    JOIN 
+        sys.tables AS t ON kc.parent_object_id = t.object_id
+    WHERE 
+        kc.type = 'PK'  
+        AND t.name = ?;  
+    """
+    
+    
+    cursor.execute(query, (table,))  
+    print("Primary Key Name\tColumn Name")
+    print("-----------------------------------")
+    
+    for row in cursor.fetchall():
+        print(f"{row.PrimaryKeyName}\t\t{row.ColumnName}")
+
+def fetch_mssql_primary_keys(db_connection, db_cursor, table):
+    if db_connection  and table:
+        try:
+            db_cursor.execute(f"""SELECT 
+                name AS COLUMN_NAME,
+                column_id
+            FROM 
+                sys.columns
+            WHERE 
+                object_id = OBJECT_ID('{table}');
+            """)
+            all_discription = db_cursor.fetchall()
+            # print(all_discription)
+            colum_name = []
+            for i in all_discription:
+                colum_name.append(i[0])
+            
+
+            res = {
+                        "status" : 1,
+                        "data" : colum_name
+                    }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def mssql_random_access_data(connection, database, table, length, start , val, cursor):
+    
+    if connection and database and table:
+        try:
+            cursor.execute(f"SELECT TOP {length} * FROM {table} ORDER BY NEWID()")
+            random_field = cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : random_field
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def display_mssql_bottom_10_datas(connection, database, table, length, start , val, ids, cursor):
+    if connection and database and  table and ids:
+        try:
+            
+            cursor.execute(f"SELECT * FROM {table} ORDER BY {ids} DESC OFFSET 0 ROWS FETCH NEXT {length} ROWS ONLY")
+            random_field = cursor.fetchall()
+            print(random_field)
+            res = {
+                    "status" : 1,
+                    "data" : random_field
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res 
+
+def mssql_index_access_data(connection, database_name, table_name, length, start , val, cursor, ids):
+    if connection and database_name and table_name:
+        
+        try:
+            query = f"""
+                SELECT * FROM {table_name} WHERE id>={ids} LIMIT {length}
+            """
+            # print(query)  
+            
+            cursor.execute(query)
+            index_field = cursor.fetchall()
+            # print(index_field)
+            res = {
+                "status" : 1,
+                "data" : index_field
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def dispaly_permission(connection, database, table):
+    print("#################", database, table)
+def mssql_main(data):
+    
+    if data:
+        try:
+            connection = mssql_create_connection(data)
+            
+            if connection['status'] == 1:
+                cursor = connection['data'].cursor()
+                databases = mssql_get_all_databases(connection['data'])
+                if databases['status'] == 1:
+                    check_uid = data.get('uid','')
+                    password = None
+                    if check_uid:
+                        if data['password']:
+                            response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                            if response is not None:
+                                password = response
+                            else:
+                                password = data['password']
+                    else:
+                        password = data.get('password', '')
+                    
+                    for database in databases['data']:
+                        
+                        tables = display_mssql_tables(connection, database[0], cursor)
+                        if tables['status'] ==1:
+                            values = tables['data']
+                            if values:
+                                data_ = []
+                                list_files = {}
+                                for table in values:
+                                   
+                                    data_.append({'table_name': table[0], 'database_name' : database[0], 'database_path':'', 'source':'mssql'})   
+                                list_files['db_list'] = data_
+                                first_api = ddr_check_database(list_files)
+
+                                if first_api['status'] == 1:
+                                    response_value = first_api['files']
+                                    
+                                    files=response_value.get('files')
+                                    
+                                    query_type = response_value.get('query_type')
+                                    if query_type:
+                                        pattern = query_type.get('pattern')
+                                        length = query_type.get('length')
+                                        start = query_type.get('start')
+                                    for file in files:
+                                        table_name = file.get('table_name')
+                                        database_name = file.get("database_name")    
+                                        users_permissions_res = display_mssql_users_permission(connection, cursor)
+                                        
+                                        if users_permissions_res['status'] == 1:
+                                            user_permission = users_permissions_res['data']
+                                        elif users_permissions_res['status'] == 0:
+                                            user_permission = []
+
+                                        # if pattern == 'top':
+                                        #     coulumn_discription_res = display_mssql_coulums_discriptions(connection, database_name, table_name, cursor)
+                                        #     if coulumn_discription_res['status'] == 1:
+                                        #         parsed_columns = []
+                                        #         for column in coulumn_discription_res['data']:    
+                                        #             parsed_columns.append(column)
+                                        #         val = '`'
+                                        #         val = val+ '`,`'.join(parsed_columns)+'`' 
+                                        #         if parsed_columns: 
+                                        #             top_10_datas = display_mssql_top_10_datas(connection, cursor, database_name, table_name, length, start, val)
+                                        #             if top_10_datas['status'] == 1:
+                                        #                 result = []
+                                        #                 for rows in top_10_datas['data']:
+                                        #                     if len(rows) != len(parsed_columns):
+                                        #                         continue
+                                        #                     data__ = {} 
+                                        #                     for col in range(len(rows)):
+                                        #                         data__[parsed_columns[col]] =  str(rows[col])
+                                        #                     result.append(data__)
+                                        #                 json_data = json.dumps(result)
+                                        #                 if result:
+                                        #                     db_content = {}
+                                        #                     db_content['database_content'] = result
+                                        #                     data = {
+                                        #                     "db_details": {
+                                        #                         "table_name": str(table_name),
+                                        #                         "database_name": str(database_name),
+                                        #                         "path": "",
+                                        #                         "schema": "",
+                                        #                         "size": 0,
+                                        #                         "created_at": 1234567865,
+                                        #                         "accessed_at": 6543321345,
+                                        #                         "modified_at": 7654321342,
+                                        #                         "source": "db_postgresql",
+                                        #                         "db_permissions": user_permission,
+                                        #                         "sensitivity": "",
+                                        #                         "category": "",
+                                        #                         "risk_level": "",
+                                        #                         "pattern_match": "",
+                                        #                         "compliance": "",
+                                        #                         "classification": "",
+                                        #                         "pii_contained": "",
+                                        #                         "phi_contained": "",
+                                        #                         "pci_contained": "",
+                                        #                         "permission_type": "",
+                                        #                         "rot_data": 0
+                                        #                     },
+                                        #                     "db_content": db_content
+                                        #                     }
+                                        #                     res = ddr_insert_database(data)
+                                        #                     if res['status'] == 1:
+                                        #                         print(res)
+
+                                        # if pattern == 'bottom':
+                                        #     column_discription_res  = display_mssql_coulums_discriptions(connection, database_name, table_name, cursor)
+                                            
+                                        #     if column_discription_res['status'] == 1:
+                                        #         parsed_columns = []
+                                        #         for column in column_discription_res['data']:
+                                                    
+                                        #             parsed_columns.append(column)
+                                        #         val = '"'
+                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                                
+                                        #         colum_id_details = fetch_mssql_primary_keys(connection, cursor, table_name)
+                                                
+                                                
+                                        #         for ids in colum_id_details['data']:
+                                                    
+                                        #             bottom_10_datas = display_mssql_bottom_10_datas(connection, database_name, table_name, length, start , val, ids, cursor)         
+                                                    
+                                        #             if bottom_10_datas:
+                                        #                 if bottom_10_datas and  bottom_10_datas['status'] == 1:
+                                                            
+                                        #                     result = []
+                                        #                     for rows in bottom_10_datas['data']:
+                                        #                         if len(rows) != len(parsed_columns):
+                                        #                             continue
+                                        #                         data__ = {} 
+                                        #                         for col in range(len(rows)):
+                                        #                             data__[parsed_columns[col]] =  str(rows[col])
+                                        #                         result.append(data__)
+                                                            
+                                        #                     if not result:
+                                        #                         print('No datas')
+                                        #                     else:
+                                        #                         json_data = json.dumps(result)
+
+                                        #                         # print(result)
+                                                            
+                                        #                     if result:
+                                        #                         db_content = {}
+                                        #                         db_content['database_content'] = result
+                                        #                         data = {
+                                        #                         "db_details": {
+                                        #                             "table_name": str(table_name),
+                                        #                             "database_name": str(database_name),
+                                        #                             "path": "",
+                                        #                             "schema": "",
+                                        #                             "size": 0,
+                                        #                             "created_at": 1234567865,
+                                        #                             "accessed_at": 6543321345,
+                                        #                             "modified_at": 7654321342,
+                                        #                             "source": "db_postgresql",
+                                        #                             "db_permissions": user_permission,
+                                        #                             "sensitivity": "",
+                                        #                             "category": "",
+                                        #                             "risk_level": "",
+                                        #                             "pattern_match": "",
+                                        #                             "compliance": "",
+                                        #                             "classification": "",
+                                        #                             "pii_contained": "",
+                                        #                             "phi_contained": "",
+                                        #                             "pci_contained": "",
+                                        #                             "permission_type": "",
+                                        #                             "rot_data": 0
+                                        #                         },
+                                        #                         "db_content": db_content
+                                        #                         }
+                                        #                         res = ddr_insert_database(data)
+                                        #                         if res['status'] == 1:
+                                        #                             print(res)
+  
+                                        # if pattern == 'random':           
+                                        #     column_discription_res  = display_mssql_coulums_discriptions(connection, database_name, table_name, cursor)
+                                        #     if column_discription_res['status'] == 1:
+                                        #         print(column_discription_res['data'])
+                                        #         parsed_columns = []
+                                        #         for column in column_discription_res['data']: 
+                                        #             parsed_columns.append(column)
+                                        #         val = '"'
+                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                        #         random_10_datas  = mssql_random_access_data(connection, database_name, table_name, length, start , val, cursor)
+                                        #         if random_10_datas['status'] == 1:
+                                        #             result = []
+                                        #             for rows in random_10_datas['data']:
+                                        #                 if len(rows) != len(parsed_columns):
+                                        #                     continue
+                                        #                 data__ = {} 
+                                        #                 for col in range(len(rows)):
+                                        #                     data__[parsed_columns[col]] =  str(rows[col])
+                                        #                 result.append(data__)
+                                        #             json_data = json.dumps(result)
+                                        #             if result:
+                                        #                 db_content = {}
+                                        #                 db_content['database_content'] = result
+                                        #                 data = {
+                                        #                 "db_details": {
+                                        #                     "table_name": str(table_name),
+                                        #                     "database_name": str(database_name),
+                                        #                     "path": "",
+                                        #                     "schema": "",
+                                        #                     "size": 0,
+                                        #                     "created_at": 1234567865,
+                                        #                     "accessed_at": 6543321345,
+                                        #                     "modified_at": 7654321342,
+                                        #                     "source": "db_postgresql",
+                                        #                     "db_permissions": user_permission,
+                                        #                     "sensitivity": "",
+                                        #                     "category": "",
+                                        #                     "risk_level": "",
+                                        #                     "pattern_match": "",
+                                        #                     "compliance": "",
+                                        #                     "classification": "",
+                                        #                     "pii_contained": "",
+                                        #                     "phi_contained": "",
+                                        #                     "pci_contained": "",
+                                        #                     "permission_type": "",
+                                        #                     "rot_data": 0
+                                        #                 },
+                                        #                 "db_content": db_content
+                                        #                 }
+                                        #                 res = ddr_insert_database(data)
+                                        #                 if res['status'] == 1:
+                                        #                     print(res, database_name, table_name)
+
+                                        # if pattern == 'index':           
+                                        #     column_discription_res  = display_mssql_coulums_discriptions(connection, database_name, table_name, cursor)
+                                        #     if column_discription_res['status'] == 1:
+                                        #         parsed_columns = []
+                                        #         for column in column_discription_res['data']: 
+                                        #             parsed_columns.append(column)
+                                        #         val = '"'
+                                        #         val =val+ '","'.join(parsed_columns)+'"'
+                                        #         colum_id_details = fetch_mssql_primary_keys(connection, cursor, table[0])
+                                        #         for ids in colum_id_details['data']:
+                                        #             index_datas  = mssql_index_access_data(connection, database_name, table_name, length, start , val, cursor, ids)
+                                        #             print(index_datas)
+                                        #             if index_datas['status'] == 1:
+                                        #                 result = []
+                                        #                 for rows in random_10_datas['data']:
+                                        #                     if len(rows) != len(parsed_columns):
+                                        #                         continue
+                                        #                     data__ = {} 
+                                        #                     for col in range(len(rows)):
+                                        #                         data__[parsed_columns[col]] =  str(rows[col])
+                                        #                     result.append(data__)
+                                        #                 json_data = json.dumps(result)
+                                        #                 if result:
+                                        #                     db_content = {}
+                                        #                     db_content['database_content'] = result
+                                        #                     data = {
+                                        #                     "db_details": {
+                                        #                         "table_name": str(table_name),
+                                        #                         "database_name": str(database_name),
+                                        #                         "path": "",
+                                        #                         "schema": "",
+                                        #                         "size": 0,
+                                        #                         "created_at": 1234567865,
+                                        #                         "accessed_at": 6543321345,
+                                        #                         "modified_at": 7654321342,
+                                        #                         "source": "db_postgresql",
+                                        #                         "db_permissions": user_permission,
+                                        #                         "sensitivity": "",
+                                        #                         "category": "",
+                                        #                         "risk_level": "",
+                                        #                         "pattern_match": "",
+                                        #                         "compliance": "",
+                                        #                         "classification": "",
+                                        #                         "pii_contained": "",
+                                        #                         "phi_contained": "",
+                                        #                         "pci_contained": "",
+                                        #                         "permission_type": "",
+                                        #                         "rot_data": 0
+                                        #                     },
+                                        #                     "db_content": db_content
+                                        #                     }
+                                        #                     res = ddr_insert_database(data)
+                                        #                     if res['status'] == 1:
+                                        #                         print(res, database_name, table_name)
+                                      
+                
+        except Exception as e:
+            print("Error: ", traceback.format_exc(e))
+    else:
+        print("Data Details is not found!")
+
+def create_mongodb_connection(data):
+    
+    if data:
+        host = data['host']
+        port = data['port']
+        username = data['username']
+        password = data['password']
+        
+        try:
+            password = None
+            check_uid = data.get('uid')
+            if check_uid:
+                if data['password']:
+                    response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                    if response is not None:
+                        password = response
+                    else:
+                        password = data['password']
+            else:
+                password = data.get('password', '')
+            connection = f'mongodb://{username}:{password}@{host}:{port}/'
+            client = MongoClient(connection)
+            print("Mongodb connected")
+            
+            res = {
+                "status" : 1,
+                "data" : client
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+         
+
+def mongodb_all_databases(connection):
+    try: 
+        databases = connection.list_database_names()
+        res = {
+            "status" : 1,
+            "data" : databases
+                }
+        return res 
+    except Exception as e:
+        print(e)
+        res = {
+            "status" : 0,
+            "message" : str(e)
+        }
+        return res
+
+def display_mongodb_schema(connection):
+    if connection:
+        try:
+            d = {db: connection[db].list_collection_names() for db in connection.list_database_names()}    
+            res = {
+                "status" : 1,
+                "data" : d
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def display_mongodb_users_permissions(client, db_name, table):
+    # print(db_name, table)
+    db = client[db_name]
+    privilages = table.find()
+    for prem in privillages:
+        print("Userid :", prem[0])
+    
+    # privillages = db[table]
+
+    # privileges_list = privillages.find()
+    # for privilege in privileges_list:
+    #     print(f"User ID: {privilege['user_id']}, User Name: {privilege['user_name']}, "
+    #         f"Create: {privilege['create']}, Read: {privilege['read']}, "
+    #         f"Update: {privilege['update']}, Delete: {privilege['delete']}, "
+    #         f"Share: {privilege['share']}")
+
+    # if connection and database and table:
+    #     db = connection[database]
+    #     permissions = db.command("usersInfo","*")
+    #     print(permissions)
+
+
+    # print(database)
+    # admin_db = client[database]
+
+    # users = admin_db.command('usersInfo')['users']
+            
+    # for user in users:
+    #     print(f"User: {user['user']}, Roles: {user['roles']}")
+
+
+    # admin_db = client['admin']
+
+    
+    # users_info = admin_db.command('usersInfo')['users']
+
+   
+    # for user in users_info:
+    #     user_name = user.get('user', 'Unknown User')
+    #     roles = user.get('roles', [])
+        
+        
+    #     role_descriptions = [f"{role.get('role', 'Unknown Role')} in {role.get('db', 'Unknown DB')}" for role in roles]
+        
+    #     print(f"User: {user_name}")
+    #     print("Roles:")
+    #     for role_desc in role_descriptions:
+    #         print(f" - {role_desc}")
+    #     print()
+
+def create_mysql_connection(data = {}):
+    if data:
+        try:
+            password = None
+            check_uid = data.get('uid')
+            if check_uid:
+                if data['password']:
+                    response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                    if response is not None:
+                        password = response
+                    else:
+                        password = data['password']
+            else:
+                password = data.get('password', '')
+                # print(password)
+            connection = mysql.connector.connect(
+                user = data.get('username'),
+                password = password,
+                host =  data.get('host'),
+                port =data.get('port')
+            )
+            res = {
+                "status" : 1,
+                "data" : connection
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+
+def get_all_mysql_databases(connection):
+    
+    if connection.is_connected():
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SHOW DATABASES")
+            databases = cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : databases
+            }
+            return res
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def display_mysql_users_permission(db_connection, db_cursor):
+    if db_connection:
+        
+        try:  
+            db_cursor.execute("""
+                SELECT *, CONCAT(u.user, '@', u.host) AS user_id
+                FROM mysql.db AS u
+                ORDER BY u.user, u.host, u.db;
+            """)
+            
+            users_permissions = db_cursor.fetchall()
+
+            total_users_permission = []
+            for perm in users_permissions:
+                
+                permission_data = {
+                        "user_id": perm[22],
+                        "user_name": perm[2],
+                        "user_type": "",
+                        "create": 0,
+                        "read": 0,
+                        "update": 0,
+                        "delete": 0,
+                        "share": 0,
+                        "data": {
+                        "role": "",
+                        "category": "",
+                        "role_id": ""
+                        }
+                    }
+                if perm[5] == 'DELETE':
+                    permission_data['delete'] = 1
+                elif perm[3] == 'INSERT':
+                    permission_data['create'] = 1
+                elif perm[4] == 'UPDATE':
+                    permission_data['update'] = 1
+                elif perm[2] == 'SELECT':
+                    permission_data['read'] = 1
+                total_users_permission.append(permission_data)
+                res = {
+                    "status" : 1,
+                    "data" : total_users_permission
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+    
+    else:
+        print("Invalid database connection.")
+
+def display_mysql_column_discription(db_connection, database_name, table_name, db_cursor):
+    
+    if db_connection:
+        try:        
+            db_cursor.execute(f"""
+                SELECT 
+                    COLUMN_NAME    
+                FROM 
+                    information_schema.COLUMNS 
+                WHERE 
+                    TABLE_SCHEMA = '{database_name}' 
+                    AND TABLE_NAME = '{table_name}'    
+                ORDER BY 
+                    ORDINAL_POSITION;
+            """)
+            columns = db_cursor.fetchall()
+            # print("coulmns :", columns)
+            if columns:
+                res = {
+                    "status" : 1,
+                    "data" : columns
+                }
+                return res
+            else:
+                print()
+                return {}
+
+        except Exception as e:
+            print("Error fetching column descriptions:", str(e))
+        
+    else:
+        print("Invalid database connection.")
+
+def display_mysql_top_10_datas(db_connection, db_cursor, database_name, table_name, length, start, column):
+    
+    if db_connection and database_name and table_name :
+        try:
+            
+            query = (f"SELECT {column} FROM {table_name} LIMIT {length} OFFSET {start} ")
+            values = db_cursor.execute(query)
+            top_10_datas = db_cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : top_10_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def fetch_mysql_primary_keys(db_connection, database, table, cursor):
+   
+    try:
+        query = f"""
+            SELECT 
+                TABLE_NAME, 
+                COLUMN_NAME
+            FROM 
+                information_schema.KEY_COLUMN_USAGE
+            WHERE 
+                TABLE_SCHEMA = {table}  
+                AND CONSTRAINT_NAME = 'PRIMARY';
+        """
+        
+        
+        primary_keys = cursor.fetchall(query)
+        # print(primary_keys)
+        # exit()
+        res = {
+                    "status" : 1,
+                    "data" : primary_keys[1]
+                }
+        return res 
+    except Exception as e:
+        res = {
+            "status":0,
+            "message":str(e)
+        }
+        return res
+
+def display_mysql_random_10_datas(connection,cursor, database, table_name, length, start , val):
+    
+    if connection and database and table_name:
+        try:
+            
+            cursor.execute(f"SELECT * FROM {table_name} ORDER BY RAND() LIMIT {length}")
+            random_field = cursor.fetchall()
+
+            res = {
+                    "status" : 1,
+                    "data" : random_field
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def mysql_dispaly_column_primary_keys(connection, cursor, database_name, table_name):
+    if connection and  database_name and table_name:
+        try:
+            cursor.execute(f"""SELECT COLUMN_NAME
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = '{database_name}' 
+                    AND TABLE_NAME = '{table_name}' 
+                    AND CONSTRAINT_NAME = 'PRIMARY';
+                """)
+            ids = cursor.fetchall() 
+            res = {
+                    "status" : 1,
+                    "data" : ids
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res
+
+def display_mysql_index_10_datas(connection, cursor, database_name, table_name, length, start, val, ids):
+    
+    if connection and database_name and table_name:
+        try:
+            cursor.execute(f"""SELECT * FROM {table_name} ORDER BY {ids} DESC LIMIT 10
+            """)
+            cursor.execute(query)
+            index_datas = cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : index_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res  
+
+def display_mysql_bottom_10_datas(connection, cursor, database_name, table_name, length, start, val, ids):
+    if connection and database_name and table_name:
+        try:
+           
+            query = f"SELECT * FROM `{table_name}` ORDER BY `{ids}` DESC LIMIT {length} "
+            cursor.execute(query)
+            bottom_10_datas = cursor.fetchall()
+            res = {
+                    "status" : 1,
+                    "data" : bottom_10_datas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status":0,
+                "message":str(e)
+            }
+            return res  
+def mysql_main(data):
+    
+    if data:
+        connection = create_mysql_connection(data)   
+        if connection['status'] == 1:
+            
+            cursor = connection['data'].cursor()
+            databases = get_all_mysql_databases(connection['data'])
+            # print(databases)
+            
+            if databases['status'] == 1:
+                
+                check_uid = data.get('uid','')
+                password = None
+                if check_uid:
+                    if data['password']:
+                        response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                        if response is not None:
+                            password = response
+                        else:
+                            password = data['password']
+                else:
+                    password = data.get('password', '')
+                
+                for database in databases['data']:
+                    
+                    cursor.execute(f"USE {database[0]}")
+                    cursor.execute("SELECT DATABASE()")
+                    current_db = cursor.fetchone()
+                    cursor.execute(f"""
+                        SELECT table_name 
+                        FROM information_schema.tables 
+                        WHERE table_schema = '{current_db[0]}'
+                    """)
+
+                    tables = cursor.fetchall()
+                    if tables:
+                        data_ = []
+                        list_files = {}
+                        for table in tables:
+                            data_.append({'table_name': table[0], 'database_name': database[0], 'database_path':'', 'source':'mysql'})  
+                        list_files['db_list'] = data_
+                        first_api = ddr_check_database(list_files)
+                        
+
+                        if first_api['status'] == 1:
+                            response_value = first_api['files']
+                            files=response_value.get('files')
+                            query_type = response_value.get('query_type')
+                            if query_type:
+                                pattern = query_type.get('pattern')
+                                length = query_type.get('length')
+                                start = query_type.get('start')
+                            for file in files:
+                                table_name = file.get('table_name')
+                                database_name = file.get("database_name")    
+                                users_permissions_res = display_mysql_users_permission(connection, cursor)
+
+                                if users_permissions_res['status'] == 1:
+                                    user_permission = users_permissions_res['data']
+                                    
+                                elif users_permissions_res['status'] == 0:
+                                    user_permission = []
+
+                                # if pattern == 'top':
+                                #     coulumn_discription_res = display_mysql_column_discription(connection, database_name, table_name, cursor)
+                                #     if coulumn_discription_res['status'] == 1:
+                                #         parsed_columns = []
+                                #         for column in coulumn_discription_res['data']:
+                                #             parsed_columns.append(column[0])
+                                #         val = '`'
+                                #         val = val+ '`,`'.join(parsed_columns)+'`' 
+                                        
+                                #         top_10_datas = display_mysql_top_10_datas(connection, cursor, database_name, table_name, length, start, val)
+                                #         # print(top_10_datas['data'])
+                                #         if top_10_datas['status'] == 1:
+                                #             result = []
+                                #             for rows in top_10_datas['data']:
+                                #                 if len(rows) != len(parsed_columns):
+                                #                     continue
+                                #                 data__ = {} 
+                                #                 for col in range(len(rows)):
+                                #                     data__[parsed_columns[col]] =  str(rows[col])
+                                #                 result.append(data__)
+                                #             json_data = json.dumps(result)
+                                #             if result:
+                                #                 # print(result)
+                                #                 db_content = {}
+                                #                 db_content['database_content'] = result
+                                #                 data = {
+                                #                 "db_details": {
+                                #                     "table_name": str(table_name[0]),
+                                #                     "database_name": str(database_name),
+                                #                     "path": "",
+                                #                     "schema": "",
+                                #                     "size": 0,
+                                #                     "created_at": 1234567865,
+                                #                     "accessed_at": 6543321345,
+                                #                     "modified_at": 7654321342,
+                                #                     "source": "db_postgresql",
+                                #                     "db_permissions": user_permission,
+                                #                     "sensitivity": "",
+                                #                     "category": "",
+                                #                     "risk_level": "",
+                                #                     "pattern_match": "",
+                                #                     "compliance": "",
+                                #                     "classification": "",
+                                #                     "pii_contained": "",
+                                #                     "phi_contained": "",
+                                #                     "pci_contained": "",
+                                #                     "permission_type": "",
+                                #                     "rot_data": 0
+                                #                 },
+                                #                 "db_content": db_content
+                                #                 }
+                                #                 res = ddr_insert_database(data)
+                                #                 if res['status'] == 1:
+                                #                     print(res)
+
+                                # if pattern == 'index':
+                                #     coulumn_discription_res = display_mysql_column_discription(connection, database_name, table_name, cursor)
+                                #     if coulumn_discription_res['status'] == 1:
+                                #         parsed_columns = []
+                                #         for column in coulumn_discription_res['data']:
+                                #             parsed_columns.append(column[0])
+                                #         val = '`'
+                                #         val = val+ '`,`'.join(parsed_columns)+'`' 
+                                #         column_id = fetch_mysql_primary_keys(connection, cursor, database_name, table_name)
+                                #         # print(column_id)
+                                #         index_10_datas = display_mysql_index_10_datas(connection, cursor, database_name, table_name, length, start, val, column_id)
+                                #         # print(index_10_datas['data'])
+                                #         if index_10_datas['status'] == 1:
+                                #             result = []
+                                #             for rows in index_10_datas['data']:
+                                #                 data__ = {} 
+                                #                 for col in range(len(rows)):
+                                #                     data__[parsed_columns[col]] =  str(rows[col])
+                                #                 result.append(data__)
+                                #             json_data = json.dumps(result)
+                                #             if index_10_datas:
+                                                
+                                #                 db_content = {}
+                                #                 db_content['database_content'] = result
+                                #                 data = {
+                                #                 "db_details": {
+                                #                     "table_name": str(table_name[0]),
+                                #                     "database_name": str(database_name),
+                                #                     "path": "",
+                                #                     "schema": "",
+                                #                     "size": 0,
+                                #                     "created_at": 1234567865,
+                                #                     "accessed_at": 6543321345,
+                                #                     "modified_at": 7654321342,
+                                #                     "source": "db_postgresql",
+                                #                     "db_permissions": user_permission,
+                                #                     "sensitivity": "",
+                                #                     "category": "",
+                                #                     "risk_level": "",
+                                #                     "pattern_match": "",
+                                #                     "compliance": "",
+                                #                     "classification": "",
+                                #                     "pii_contained": "",
+                                #                     "phi_contained": "",
+                                #                     "pci_contained": "",
+                                #                     "permission_type": "",
+                                #                     "rot_data": 0
+                                #                 },
+                                #                 "db_content": db_content
+                                #                 }
+                                #                 res = ddr_insert_database(data)
+                                #                 if res['status'] == 1:
+                                #                     print(res)
+
+                                # if pattern == 'random':
+                                #     coulumn_discription_res = display_mysql_column_discription(connection, database_name, table_name, cursor)
+                                #     if coulumn_discription_res['status'] == 1:
+                                #         parsed_columns = []
+                                #         for column in coulumn_discription_res['data']:
+                                #             parsed_columns.append(column[0])
+                                #         val = '`'
+                                #         val = val+ '`,`'.join(parsed_columns)+'`' 
+                                        
+                                #         random_10_datas = display_mysql_random_10_datas(connection, cursor, database_name, table_name, length, start, val)
+                                       
+                                #         if random_10_datas['status'] == 1:
+                                #             result = []
+                                #             for rows in random_10_datas['data']:
+                                                
+                                #                 data__ = {} 
+                                #                 for col in range(len(rows)):
+                                #                     data__[parsed_columns[col]] =  str(rows[col])
+                                #                 result.append(data__)
+                                #             json_data = json.dumps(result)
+                                            
+                                #             if random_10_datas:
+                                #                 db_content = {}
+                                #                 db_content['database_content'] = result
+                                #                 data = {
+                                #                 "db_details": {
+                                #                     "table_name": str(table_name[0]),
+                                #                     "database_name": str(database_name),
+                                #                     "path": "",
+                                #                     "schema": "",
+                                #                     "size": 0,
+                                #                     "created_at": 1234567865,
+                                #                     "accessed_at": 6543321345,
+                                #                     "modified_at": 7654321342,
+                                #                     "source": "db_postgresql",
+                                #                     "db_permissions": user_permission,
+                                #                     "sensitivity": "",
+                                #                     "category": "",
+                                #                     "risk_level": "",
+                                #                     "pattern_match": "",
+                                #                     "compliance": "",
+                                #                     "classification": "",
+                                #                     "pii_contained": "",
+                                #                     "phi_contained": "",
+                                #                     "pci_contained": "",
+                                #                     "permission_type": "",
+                                #                     "rot_data": 0
+                                #                 },
+                                #                 "db_content": db_content
+                                #                 }
+                                #                 res = ddr_insert_database(data)
+                                #                 if res['status'] == 1:
+                                #                     print(res)
+
+                                if pattern == 'top':
+                                    coulumn_discription_res = display_mysql_column_discription(connection, database_name, table_name, cursor)
+                                    if coulumn_discription_res['status'] == 1:
+                                        parsed_columns = []
+                                        for column in coulumn_discription_res['data']:
+                                            
+                                            parsed_columns.append(column[0])
+                                        val = '`'
+                                        val = val+ '`,`'.join(parsed_columns)+'`' 
+                                        column_primary_keys = mysql_dispaly_column_primary_keys(connection, cursor, database_name, table_name)
+                                        if column_primary_keys['status'] == 1:
+                                           
+                                            for ids in column_primary_keys['data']:
+                                                
+                                                bottom_10_datas = display_mysql_bottom_10_datas(connection, cursor, database_name, table_name, length, start, val, ids[0])
+                                                # print(bottom_10_datas)
+                                                if bottom_10_datas['status'] == 1:
+                                                    result = []
+                                                    for rows in bottom_10_datas['data']:
+                                                        
+                                                        data__ = {} 
+                                                        for col in range(len(rows)):
+                                                            data__[parsed_columns[col]] =  str(rows[col])
+                                                        result.append(data__)
+                                                    json_data = json.dumps(result)
+                                                    if bottom_10_datas:
+                                                        db_content = {}
+                                                        db_content['database_content'] = result
+                                                        data = {
+                                                        "db_details": {
+                                                            "table_name": str(table_name[0]),
+                                                            "database_name": str(database_name),
+                                                            "path": "",
+                                                            "schema": "",
+                                                            "size": 0,
+                                                            "created_at": 1234567865,
+                                                            "accessed_at": 6543321345,
+                                                            "modified_at": 7654321342,
+                                                            "source": "db_postgresql",
+                                                            "db_permissions": user_permission,
+                                                            "sensitivity": "",
+                                                            "category": "",
+                                                            "risk_level": "",
+                                                            "pattern_match": "",
+                                                            "compliance": "",
+                                                            "classification": "",
+                                                            "pii_contained": "",
+                                                            "phi_contained": "",
+                                                            "pci_contained": "",
+                                                            "permission_type": "",
+                                                            "rot_data": 0
+                                                        },
+                                                        "db_content": db_content
+                                                        }
+                                                        res = ddr_insert_database(data)
+                                                        if res['status'] == 1:
+                                                            print(res)
+                                                    
+
+def mongodb_main(data = {}):
+    
+    if data:
+        connection = create_mongodb_connection(data)
+        
+        if connection['status'] == 1:
+            response = display_mongodb_schema(connection['data'])
+            if response['status'] == 1:
+                database_collections = response['data']
+                list_files = {}
+                data_ = []
+                for database , tables in database_collections.items():
+                    for table in tables:
+                        data_.append({'table_name': table , 'database_name' : database, 'database_path':'', 'source':'mongodb'})    
+                list_files['db_list'] = data_
+                first_api = ddr_check_database(list_files)
+                
+
+                if first_api["status"] == 1:
+                    print('coming for second')
+                    response_value = first_api['files']
+                    query_type = response_value.get('query_type')
+                    if query_type:
+                        pattern = query_type.get('pattern')
+                        length = query_type.get('length')
+                        start = query_type.get('start')
+                        for db_name, tables in database_collections.items():   
+                            client = connection['data']  
+                            database = client[db_name]             
+                            for table in tables:
+                                try:
+                                                            
+                                    db = database[table]  
+                                    privileges = db.find({})
+                                    if  privileges:
+                                        
+
+                                        for privilege in privileges:
+                                            # print('@@@@@@@@@@@@@@', db_name ,table)
+                                            
+                                            print(f"    User ID: {privilege.get('user_id')}, User Name: {privilege.get('user_name')}, "
+                                                f"Create: {privilege.get('create')}, Read: {privilege.get('read')}, "
+                                                f"Update: {privilege.get('update')}, Delete: {privilege.get('delete')}, "
+                                                f"Share: {privilege.get('share')},"
+                                                f"Database :{db_name},"
+                                                f"Tablename: {table}")
+                                    else:
+                                        print("No privillages found")
+                                except Exception as e:
+                                    print(f"Error accessing collection '{table}' in database '{db_name}': {e}")    
+        else:
+            print("Failed to connect to MongoDB:", connection.get('error'))
+
+def create_oracle_connection(data = {}):
+    
+    if data:
+        try:
+            password = None
+            check_uid = data.get('uid')
+            if check_uid:
+                if data['password']:
+                    response = commonFunction_obj.decrypt_value(data['uid'],data['password'])
+                    if response is not None:
+                        password = response
+                    else:
+                        password = data['password']
+            else:
+                password = data.get('password', '')
+            user = data.get('username'),
+            password = password,
+            host =  data.get('host'),
+            port = data.get('port'),
+            dsn_tns = cx_Oracle.makedsn(host = host[0], port = port[0], service_name = '')
+            connection = cx_Oracle.connect(user = user[0], password = password[0], dsn = dsn_tns)
+            res = {
+                "status" : 1,
+                "data" : connection
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res 
+def get_all_oracle_databases(connection, cursor):
+    if connection:
+        try:
+            query = "SELECT name FROM v$database"
+            cursor.execute(query)
+            database_name = cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : database_name
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def display_oracle_all_schema(connection, cursor, database):
+    if connection and cursor and database:
+        try:
+            cursor.execute("SELECT username AS schema_name FROM all_users ORDER BY username")           
+            schemas = cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : schemas
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+
+def display_oracle_all_tables(connection, cursor, database, schema):
+    if connection and cursor and database and schema:
+        try:
+
+            cursor.execute("""
+                        SELECT owner, table_name
+                        FROM all_tables
+                        ORDER BY owner, table_name
+                    """)
+            tables = cursor.fetchall()
+            res = {
+                "status" : 1,
+                "data" : tables
+                }
+            return res 
+        except Exception as e:
+            res = {
+                "status" : 0,
+                "message" : str(e)
+            }
+            return res
+def display_oracle_user_permission(connection, cursor, database_name, table_name):
+    if connection and cursor and database_name and table_name:
+        
+        # try:
+        cursor.execute(f"""
+            SELECT
+                u.user_id AS user_id,
+                p.grantee AS username,
+               
+                p.table_name AS table_name,
+                p.privilege AS privilege
+            FROM
+                all_tab_privs p
+            JOIN
+                (SELECT username AS user_id FROM all_users) u ON p.grantee = u.user_id
+            WHERE
+                
+                p.table_name = '{table_name}' AND      
+                p.table_name IS NOT NULL        
+            ORDER BY
+                username, table_name
+        """)
+        permissions = cursor.fetchall()
+        
+        for perm in permissions:
+            print(f"Userid : {perm[0]}, username :{perm[1]}, table:{perm[2]} privillage:{perm[3]}")
+        
+def display_oracle_table_discription(connection, database_name, table_name, cursor):
+    print("######################")
+    if connection and database_name and table_name:
+        query = f"""
+        SELECT
+            column_name,
+            data_type,
+            data_length,
+            nullable
+        FROM
+            all_tab_columns
+        WHERE
+            table_name = '{table_name.upper()}' AND
+            owner = '{database_name.upper()}';  
+        """
+    
+        cursor.execute(query)
+        description = cursor.fetchall()
+        
+        
+        for column in description:
+            print(column)
+
+def display_oracle_top_10_datas(connection, cursor, database_name, table_name, length, start, val):
+    try:
+    
+        query = f"""
+        SELECT *
+        FROM {table_name}
+        FETCH FIRST 10 ROWS ONLY
+        """
+    
+        cursor.execute(query)
+        top_records = cursor.fetchall()
+        
+        res = {
+                "status" : 1,
+                "data" : top_records
+                }
+        return res 
+    except Exception as e:
+        res = {
+            "status" : 0,
+            "message" : str(e)
+        }
+        return res
+
+def oracle_main(data):
+    if data:
+        connection = create_oracle_connection(data)
+        if connection['status'] == 1:
+            cursor = connection['data'].cursor()
+            databases = get_all_oracle_databases(connection, cursor)
+            if databases['status'] == 1:
+                for database in databases['data']:
+                    if database:
+                        schemas = display_oracle_all_schema(connection, cursor, database)
+                        if schemas['status'] == 1:
+                            for schema in schemas['data']:
+                                tables = display_oracle_all_tables(connection, cursor, database, schema)
+                                if tables['status'] == 1:
+                                    value = tables['data']
+                                    if value:
+                                        data_ = []
+                                        list_files = {}
+                                        for table in value:
+                                            data_.append({'table_name' : table[0], 'database_name' : database[0], 'database_path':'', 'source':'oracle'})
+                                        list_files['db_list'] = data_
+                                        # print(list_files)
+                                        first_api = ddr_check_database(list_files)
+                                        # print(first_api)
+                                        if first_api['status'] == 1:
+                                            response_value = first_api['files']
+                                            files = response_value.get('files')
+                                            query_type = response_value.get('query_type')
+                                            
+                                            # top_10_datas = display_oracle_top_10_datas
+                                            
+                                            if query_type:
+                                                pattern = query_type.get('pattern')
+                                                length = query_type.get('length')
+                                                start = query_type.get('start')
+                                                print(query_type)
+                                            for file in files:
+                                                table_name = file.get('table_name')
+                                                database_name = file.get("database_name")
+                                                
+                                                print(table_name, database_name)
+                                                
+                                                # table_discription = display_oracle_table_discription(connection, database_name, table_name, cursor)
+                                                # print(table_discription)
+                                                # top_10_datas = display_oracle_top_10_datas(connection, database_name, table_name, cursor)
+                                                # exit()
+                                                users_permissions_res = display_mssql_users_permission(connection, cursor)
+                                        
+                                                if users_permissions_res['status'] == 1:
+                                                    user_permission = users_permissions_res['data']
+                                                elif users_permissions_res['status'] == 0:
+                                                    user_permission = []
+
+                                                if pattern == 'top':
+                                                    coulumn_discription_res = display_mssql_coulums_discriptions(connection, database_name, table_name, cursor)
+                                                    if coulumn_discription_res['status'] == 1:
+                                                        parsed_columns = []
+                                                        for column in coulumn_discription_res['data']:    
+                                                            parsed_columns.append(column)
+                                                        val = '`'
+                                                        val = val+ '`,`'.join(parsed_columns)+'`' 
+                                                        if parsed_columns: 
+                                                            top_10_datas = display_oracle_top_10_datas(connection, cursor, database_name, table_name, length, start, val)
+                                                            if top_10_datas['status'] == 1:
+                                                                result = []
+                                                                for rows in top_10_datas['data']:
+                                                                    if len(rows) != len(parsed_columns):
+                                                                        continue
+                                                                    data__ = {} 
+                                                                    for col in range(len(rows)):
+                                                                        data__[parsed_columns[col]] =  str(rows[col])
+                                                                    result.append(data__)
+                                                                json_data = json.dumps(result)
+                                                                if result:
+                                                                    
+                                                                    db_content = {}
+                                                                    db_content['database_content'] = result
+                                                                    data = {
+                                                                    "db_details": {
+                                                                        "table_name": str(table_name),
+                                                                        "database_name": str(database_name),
+                                                                        "path": "",
+                                                                        "schema": "",
+                                                                        "size": 0,
+                                                                        "created_at": 1234567865,
+                                                                        "accessed_at": 6543321345,
+                                                                        "modified_at": 7654321342,
+                                                                        "source": "db_postgresql",
+                                                                        "db_permissions": user_permission,
+                                                                        "sensitivity": "",
+                                                                        "category": "",
+                                                                        "risk_level": "",
+                                                                        "pattern_match": "",
+                                                                        "compliance": "",
+                                                                        "classification": "",
+                                                                        "pii_contained": "",
+                                                                        "phi_contained": "",
+                                                                        "pci_contained": "",
+                                                                        "permission_type": "",
+                                                                        "rot_data": 0
+                                                                    },
+                                                                    "db_content": db_content
+                                                                    }
+                                                                    res = ddr_insert_database(data)
+                                                                    if res['status'] == 1:
+                                                                        print(res)
+        
+        
+    else:
+        print("No data Found!")
+
+def main():
+    settings = get_settings_data()
+    # test_connection_before_run()
+
+    for setting in settings:
+        if setting.get('database') == 'postgresql':
+            postgresql_main(setting)
+
+        # if setting.get('database') == 'mssql':
+        #     mssql_main(setting)
+
+        # if setting.get('database') == 'mysql':
+        #     mysql_main(setting)
+
+        # if setting.get('database') == 'mongodb':
+        #     mongodb_main(setting)
+
+        # if setting.get('database') == 'oracle':
+        #     oracle_main(setting)
+
+    # status_json = get_stats_data()
+    # statistics_json = status_json.get('statistics', {})
+
+
+if __name__ == "__main__":
+    main()
+
+
+
