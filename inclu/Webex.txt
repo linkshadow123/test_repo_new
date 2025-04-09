@@ -1,0 +1,31 @@
+Webex
+------
+1. User Profiles : GET https://webexapis.com/v1/people/{personId}
+
+	curl -X GET "https://webexapis.com/v1/people/YOUR_PERSON_ID" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"	
+
+2. Group Memberships : GET https://webexapis.com/v1/memberships
+
+	curl -X GET "https://webexapis.com/v1/memberships" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+3. Meeting Details (Chats and Files Shared) : GET https://webexapis.com/v1/meetings/{meetingId}
+	
+	curl -X GET "https://webexapis.com/v1/meetings/YOUR_MEETING_ID" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+4. Channel Messaging : GET https://webexapis.com/v1/messages?roomId={roomId}
+
+	curl -X GET "https://webexapis.com/v1/messages?roomId=YOUR_ROOM_ID" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+5. Connected Devices (Type, IP, Location) and Active Sessions : GET https://webexapis.com/v1/devices
+	
+	curl -X GET "https://webexapis.com/v1/devices" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+6. Audit Logs : GET https://webexapis.com/v1/audit/logs
+
+	curl -X GET "https://webexapis.com/v1/audit/logs" \
+	-H "Authorization: Bearer YOUR_ACCESS_TOKEN"
