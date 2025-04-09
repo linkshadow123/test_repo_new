@@ -1,5 +1,5 @@
-Webex
-------
+Webex plugin
+-------------
 1. User Profiles : GET https://webexapis.com/v1/people/{personId}
 
 	curl -X GET "https://webexapis.com/v1/people/YOUR_PERSON_ID" \
